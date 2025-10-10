@@ -19,7 +19,7 @@ import { promise } from '@barfinex/utils';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { DetectorService } from '../detector/detector.service';
-import { toDomainCandle } from '@barfinex/utils/candle.mapper';
+import { candleMapper } from '@barfinex/utils';
 
 type CachePolicy = {
     skipCurrentFrame: boolean;     // не читаем/не сохраняем текущий бакет
@@ -44,14 +44,14 @@ export class CandleService {
             case 'binance':
                 requestMarketData = async (...args) => {
                     const raws = await createRequestBinance(options.marketType)(...args);
-                    return raws.map(toDomainCandle);
+                    return raws.map(candleMapper.toDomainCandle);
                 };
                 break;
 
             case 'alpaca':
                 requestMarketData = async (...args) => {
                     const raws = await requestAlpaca(...args);
-                    return raws.map(toDomainCandle);
+                    return raws.map(candleMapper.toDomainCandle);
                 };
                 break;
             default:

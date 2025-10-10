@@ -75,7 +75,7 @@ import { ConfigService } from "@barfinex/config/config.service";
 import { CandleService } from '../../candle/candle.service';
 import { CandleEntity } from "../../candle/candle.entity";
 import { Console } from "console";
-import { toDomainCandle } from "@barfinex/utils/candle.mapper";
+import { candleMapper } from "@barfinex/utils/src";
 
 @Injectable()
 export class BinanceService implements OnModuleInit, DataSource {
@@ -1654,7 +1654,7 @@ export class BinanceService implements OnModuleInit, DataSource {
                         symbol: { name: symbol },
                     };
 
-                    const candle = toDomainCandle(candleRaw)
+                    const candle = candleMapper.toDomainCandle(candleRaw)
 
 
                     await handler(marketType, candle);
