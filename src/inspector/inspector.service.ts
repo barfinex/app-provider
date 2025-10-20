@@ -1,9 +1,9 @@
-import { Inject, Injectable, forwardRef } from '@nestjs/common';
+import { Inject, Injectable, InternalServerErrorException, NotFoundException, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { HttpService } from '@nestjs/axios';
 import { InspectorEntity } from './inspector.entity';
-import { Inspector } from '@barfinex/types';
+import { Inspector, InspectorStrategyLogic, InspectorTradeSettings } from '@barfinex/types';
 import { ConnectorService } from '../connector/connector.service';
 import { OrderService } from '../order/order.service';
 
@@ -28,29 +28,47 @@ export class InspectorService {
 
     async create(name: string, options: Inspector): Promise<InspectorEntity> {
         let inspector = await this.inspectorRepository.findOne({ where: { name } });
+
         if (inspector) {
-            inspector.options = options
+            inspector.options = options;
             await this.inspectorRepository.update(inspector.id, inspector);
-        }
-        else {
-            await this.inspectorRepository.save({ name, options } as any);
+        } else {
+            await this.inspectorRepository.save({ name, options } as InspectorEntity);
             inspector = await this.inspectorRepository.findOne({ where: { name } });
+        }
+
+        if (!inspector) {
+            throw new InternalServerErrorException(`Failed to create or update inspector "${name}"`);
         }
 
         return inspector;
     }
 
     async get(sysname: string): Promise<Inspector> {
+
         let result: Inspector = {
+            general: { apiPort: 0 },
             key: '',
-            restApiUrl: null,
+            restApiUrl: '',
             connectors: [],
             apiPort: 0,
-            riskManagement: undefined,
-            assetManagement: undefined,
-            tradeSettings: undefined,
-            strategyLogic: undefined,
-            general: undefined
+            riskManagement: {},
+            assetManagement: { excludedAssets: [], preferredAssets: [], slippageTolerancePercent: 0, spreadTolerancePercent: 0 },
+            tradeSettings: {
+                maxPositionHoldTime: 0,
+                maxPositionSizePercent: 0,
+                minPositionSizePercent: 0,
+                maxLeverage: 0,
+                defaultLeverage: 0,
+                trailingStopPercent: 0,
+                trailingTakeProfitPercent: 0
+            },
+            strategyLogic: {
+                cooldownPeriod: 0,
+                maxConsecutiveLosses: 0,
+                minROIThreshold: 0,
+                maxROIThreshold: 0
+            }
         }
 
         const inspector = await this.inspectorRepository.findOne({ where: { name: sysname } });
@@ -60,11 +78,16 @@ export class InspectorService {
     }
 
 
-    async update(name: string, options: Inspector): Promise<any> {
+    async update(name: string, options: Inspector): Promise<InspectorEntity> {
+        const inspector = await this.inspectorRepository.findOne({ where: { name } });
 
-        let inspector = await this.inspectorRepository.findOne({ where: { name } });
-        inspector.options = options
-        if (inspector) await this.inspectorRepository.update(inspector.id, inspector);
+        if (!inspector) {
+            throw new NotFoundException(`Inspector with name "${name}" not found`);
+        }
+
+        inspector.options = options;
+        await this.inspectorRepository.update(inspector.id, inspector);
+
         return inspector;
     }
 

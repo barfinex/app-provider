@@ -67,16 +67,16 @@ export class AlpacaService implements OnModuleInit, DataSource {
     }
 
     async closeAllOrders(options: { symbol: Symbol, marketType: MarketType }): Promise<void> {
-        return null;
+        return;
     }
 
     public async getOpenOrders(options: { symbol: Symbol, detectorSysname: string, marketType: MarketType }): Promise<Order[]> {
-        return null;
+        return [];
 
     }
 
-    public async updateSubscribeCollection(marketType: MarketType, symbols: Symbol[]) {
-        return null;
+    public async updateSubscribeCollection(marketType: MarketType, symbols: Symbol[], intervals: TimeFrame[]): Promise<void> {
+        return;
     }
 
     unregisterEvents(symbol: Symbol) {
@@ -89,7 +89,7 @@ export class AlpacaService implements OnModuleInit, DataSource {
     }
 
     public async placeOrder(order: Order, options: Connector): Promise<Order> {
-        return null;
+        return order;
     }
 
     public prepareLots(lots: number, instrumentId: string) {

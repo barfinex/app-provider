@@ -779,6 +779,10 @@ export class CandleService {
         let result: CandleEntity[] = [];
         const detector = await this.detectorService.getDetector({ sysname: detectorSysname });
         for (const provider of detector.providers) {
+            if (!provider.connectors?.length) {
+                throw new Error('Provider connectors not configured');
+            }
+
             for (const connector of provider.connectors) {
                 for (const market of connector.markets) {
                     const candles = await this.get(

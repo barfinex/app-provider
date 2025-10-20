@@ -1,27 +1,13 @@
-import { Connector } from "@barfinex/types";
-import { Column, Entity, PrimaryGeneratedColumn, DeleteDateColumn, Index, ObjectIdColumn, ObjectId, PrimaryColumn } from "typeorm";
+import { Column, Entity, Index, ObjectIdColumn, ObjectId } from "typeorm";
 
 @Entity()
 export class OrderEntity {
 
-    // @ObjectIdColumn()
-    // _id: string;
-
-    // @PrimaryColumn()
-    // id: string;
-
-
-    // @ObjectIdColumn()
-    // //@ObjectIdColumn({ generated: false })
-    // id: ObjectID;
     @ObjectIdColumn()
     id: ObjectId;
 
-    // @PrimaryGeneratedColumn('increment')
-    // id: number
-
     @Column({ nullable: true })
-    externalId: string
+    externalId: string | null;
 
     @Column()
     connectorType: string
@@ -44,35 +30,30 @@ export class OrderEntity {
     @Column()
     symbol: string
 
-    @Column()
-    side: string
+    @Column({ nullable: true })
+    side: string | null
 
-    @Column()
-    type: string
+    @Column({ nullable: true })
+    type: string | null
 
-    @Column({ type: 'decimal' })
-    price: number
+    @Column({ type: 'decimal', nullable: true })
+    price: number | null
 
     @Column({ type: 'bigint' })
     time: number
 
     @Column({ type: 'bigint', nullable: true })
-    updateTime: number
-
-    @Column({ type: 'decimal' })
-    quantity: number
+    updateTime: number | null
 
     @Column({ type: 'decimal', nullable: true })
-    quantityExecuted: number
-
-    // @Column({ type: 'decimal', nullable: true })
-    // priceStop: number
+    quantity: number | null
 
     @Column({ type: 'decimal', nullable: true })
-    priceClose: number
+    quantityExecuted: number | null
 
-    // @Column({ nullable: true })
-    // isClose: boolean
+
+    @Column({ type: 'decimal', nullable: true })
+    priceClose: number | null
 
     @Column()
     useSandbox: boolean

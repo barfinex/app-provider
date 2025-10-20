@@ -1,12 +1,7 @@
 import { Injectable, Logger, HttpException, HttpStatus } from '@nestjs/common';
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
 import { decode } from 'jsonwebtoken';
-import { PortainerContainer, PortainerLog } from './portainer.interface';
-
-interface CacheEntry<T> {
-    data: T;
-    timestamp: number;
-}
+import { PortainerContainer } from './portainer.interface';
 
 @Injectable()
 export class PortainerService {
@@ -16,173 +11,135 @@ export class PortainerService {
 
     private readonly username = process.env.PONTEINER_ADMIN_USERNAME;
     private readonly password = process.env.PONTEINER_ADMIN_PASSWORD;
-    private cache: Record<string, CacheEntry<any>> = {};
 
-
-
-    // Проверка, истек ли токен
+    /**
+     * Проверка, истек ли токен
+     */
     isTokenExpired(token: string): boolean {
         try {
-            const { exp } = decode(token) as {
-                exp: number;
-            };
+            const decoded = decode(token) as { exp?: number } | null;
+            if (!decoded?.exp) return true;
+
             const currentTime = Math.floor(Date.now() / 1000);
-            return exp < currentTime;
-        } catch (error) {
-            console.error('Failed to decode token:', error.message);
+            return decoded.exp < currentTime;
+        } catch (error: unknown) {
+            const err = error as Error;
+            this.logger.error(`Failed to decode token: ${err.message}`);
             return true;
         }
     }
 
-    // Аутентификация
-    private async authenticate() {
+    /**
+     * Аутентификация с Portainer API
+     */
+    private async authenticate(): Promise<void> {
         if (!this.username || !this.password) {
-            this.logger.error('Portainer admin credentials are not set in the environment variables');
-            throw new HttpException(
-                'Portainer admin credentials are not set in the environment variables',
-                HttpStatus.INTERNAL_SERVER_ERROR,
-            );
+            const msg = 'Portainer admin credentials are not set in environment variables';
+            this.logger.error(msg);
+            throw new HttpException(msg, HttpStatus.INTERNAL_SERVER_ERROR);
         }
 
         try {
-            // this.logger.log('Authenticating with Portainer...');
-            const response = await axios.post(`${this.baseUrl}/auth`, {
+            const response = await axios.post<{ jwt: string }>(`${this.baseUrl}/auth`, {
                 Username: this.username,
                 Password: this.password,
             });
 
-            if (response.data && response.data.jwt) {
+            if (response.data?.jwt) {
                 this.token = response.data.jwt;
-                // this.logger.log('Authentication successful, token obtained.');
+                this.logger.log('Authentication successful.');
             } else {
-                this.logger.error('Failed to authenticate with Portainer');
                 throw new HttpException('Failed to authenticate with Portainer', HttpStatus.UNAUTHORIZED);
             }
-        } catch (error) {
-            this.logger.error(`Authentication error: ${error.message}`);
-            throw new HttpException(
-                error.response?.data?.message || 'Authentication error',
-                HttpStatus.UNAUTHORIZED,
-            );
+        } catch (error: unknown) {
+            const err = error as AxiosError<{ message?: string }>;
+            const message = err.response?.data?.message || err.message || 'Authentication error';
+            this.logger.error(`Authentication error: ${message}`);
+            throw new HttpException(message, HttpStatus.UNAUTHORIZED);
         }
     }
 
-    // Проверка и обновление токена
-    private async ensureAuthenticated() {
+    /**
+     * Проверка и обновление токена
+     */
+    private async ensureAuthenticated(): Promise<void> {
         if (!this.token || this.isTokenExpired(this.token)) {
             this.logger.warn('Token is missing or expired. Authenticating...');
             await this.authenticate();
         }
     }
 
-    // Универсальный запрос к ресурсу Portainer
+    /**
+     * Универсальный запрос к Portainer API с типобезопасной обработкой ошибок
+     */
     async fetchPortainerResource<T>(url: string, resourceName: string): Promise<T> {
-        await this.ensureAuthenticated(); // Проверяем токен перед запросом
+        await this.ensureAuthenticated();
 
         try {
-            // this.logger.log(`Fetching ${resourceName} from URL: ${url}...`);
             const response = await axios.get<T>(url, {
-                headers: {
-                    Authorization: `Bearer ${this.token}`,
-                },
+                headers: { Authorization: `Bearer ${this.token}` },
             });
-            // this.logger.log(`Successfully fetched ${resourceName}: ${JSON.stringify(response.data)}`);
             return response.data;
-        } catch (error) {
-            this.logger.error(`Error fetching ${resourceName}: ${error.message}`);
-            throw new HttpException(
-                error.response?.data?.message || `Failed to fetch ${resourceName}`,
-                error.response?.status || HttpStatus.BAD_REQUEST,
-            );
+        } catch (error: unknown) {
+            const err = error as AxiosError<{ message?: string }>;
+            const message = err.response?.data?.message || err.message || `Failed to fetch ${resourceName}`;
+            const status = err.response?.status || HttpStatus.BAD_REQUEST;
+
+            this.logger.error(`Error fetching ${resourceName}: ${message}`);
+            throw new HttpException(message, status);
         }
     }
 
-    // Получение контейнеров
+    /**
+     * Получение всех контейнеров Portainer
+     */
     async getContainers(): Promise<PortainerContainer[]> {
-        const endpointName: string = 'local';
+        const endpointName = 'local';
+        const endpoints = await this.fetchPortainerResource<any[]>(`${this.baseUrl}/endpoints`, 'endpoints');
 
-        const endpoints = await this.fetchPortainerResource<any[]>(
-            `${this.baseUrl}/endpoints`,
-            'endpoints'
-        );
-
-        const targetEndpoint = endpoints.find((endpoint: any) => endpoint.Name === endpointName);
+        const targetEndpoint = endpoints.find((endpoint) => endpoint.Name === endpointName);
         if (!targetEndpoint) {
-            throw new HttpException(
-                `Endpoint "${endpointName}" not found.`,
-                HttpStatus.NOT_FOUND,
-            );
+            throw new HttpException(`Endpoint "${endpointName}" not found.`, HttpStatus.NOT_FOUND);
         }
 
         const endpointId = targetEndpoint.Id;
-        // this.logger.log(`Found endpoint "${endpointName}" with ID ${endpointId}.`);
-
         const containers = await this.fetchPortainerResource<PortainerContainer[]>(
             `${this.baseUrl}/endpoints/${endpointId}/docker/containers/json`,
-            `containers for endpoint-${endpointId}`
+            `containers for endpoint-${endpointId}`,
         );
 
         if (!containers.length) {
-            throw new HttpException(
-                `No containers found for endpoint ${endpointId}.`,
-                HttpStatus.NOT_FOUND,
-            );
+            throw new HttpException(`No containers found for endpoint ${endpointId}.`, HttpStatus.NOT_FOUND);
         }
 
         return containers;
     }
 
-    // Получение логов контейнера
+    /**
+     * Получение информации о конкретном контейнере + логи
+     */
     async getContainer(containerId: string): Promise<PortainerContainer> {
-        const endpointName: string = 'local';
+        const endpointName = 'local';
+        const endpoints = await this.fetchPortainerResource<any[]>(`${this.baseUrl}/endpoints`, 'endpoints');
 
-        const endpoints = await this.fetchPortainerResource<any[]>(
-            `${this.baseUrl}/endpoints`,
-            'endpoints'
-        );
-
-        const targetEndpoint = endpoints.find((endpoint: any) => endpoint.Name === endpointName);
+        const targetEndpoint = endpoints.find((endpoint) => endpoint.Name === endpointName);
         if (!targetEndpoint) {
-            throw new HttpException(
-                `Endpoint "${endpointName}" not found.`,
-                HttpStatus.NOT_FOUND,
-            );
+            throw new HttpException(`Endpoint "${endpointName}" not found.`, HttpStatus.NOT_FOUND);
         }
 
         const endpointId = targetEndpoint.Id;
-        // this.logger.log(`Found endpoint "${endpointName}" with ID ${endpointId}.`);
 
-
-        // Запрашиваем информацию о контейнере
         const containerDetails = await this.fetchPortainerResource<PortainerContainer>(
             `${this.baseUrl}/endpoints/${endpointId}/docker/containers/${containerId}/json`,
-            `container details for ${containerId}`
+            `container details for ${containerId}`,
         );
-
-
 
         const logs = await this.fetchPortainerResource<string>(
             `${this.baseUrl}/endpoints/${endpointId}/docker/containers/${containerId}/logs?stdout=true&stderr=true&timestamps=true&tail=50`,
-            `logs for container-${containerId}`
+            `logs for container-${containerId}`,
         );
 
-        // const parsedLogs: PortainerLog[] = logs.split('\n').map((logLine) => {
-        //     const [timestamp, streamWithMessage] = logLine.split(' ', 2);
-        //     if (!timestamp || !streamWithMessage) {
-        //         return null;
-        //     }
-        //     const [stream, ...messageParts] = streamWithMessage.split(':');
-        //     return {
-        //         timestamp,
-        //         stream: stream.trim() as 'stdout' | 'stderr',
-        //         message: messageParts.join(':').trim(),
-        //     };
-        // }).filter((log) => log !== null);
-
-        // Добавляем логи к информации о контейнере
         containerDetails.Logs = logs;
-
-        // this.logger.log(`Fetched logs for container "${containerId}".`);
         return containerDetails;
     }
 }

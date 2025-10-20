@@ -1,10 +1,8 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import {
     Symbol,
     ConnectorType,
-    MarketType,
-    Position,
-    Connector,
+    MarketType
 } from '@barfinex/types';
 import { ConnectorService } from '../connector/connector.service';
 

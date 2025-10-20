@@ -1,5 +1,5 @@
-import { Controller, Get, Inject, Param } from '@nestjs/common';
-import { Symbol, Position, MarketType, ConnectorType } from '@barfinex/types';
+import { Controller, Get, Param } from '@nestjs/common';
+import { Symbol, MarketType, ConnectorType } from '@barfinex/types';
 import { SymbolService, } from './symbol.service';
 import { ApiTags } from '@nestjs/swagger';
 

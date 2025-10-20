@@ -17,10 +17,10 @@ export class DetectorService {
 
     constructor(
         private http: HttpService,
-        @InjectRepository(DetectorEntity) 
+        @InjectRepository(DetectorEntity)
         private readonly detectorRepository: Repository<DetectorEntity>,
 
-         @Inject(forwardRef(() => ConnectorService))
+        @Inject(forwardRef(() => ConnectorService))
         private readonly connectorService: ConnectorService,
 
         @Inject(forwardRef(() => OrderService))
@@ -96,7 +96,7 @@ export class DetectorService {
         return await this.orderService.deleteAll({ connectorType, marketType, symbols });
     }
 
-    async updateSubscribeCollectionInConnector(options: { connectorType: ConnectorType, marketType: MarketType, symbols: Symbol[], intervals: TimeFrame[] }): Promise<any> {
+    async updateSubscribeCollectionInConnector(options: { connectorType: ConnectorType, marketType: MarketType, symbols: Symbol[], intervals?: TimeFrame[] }): Promise<any> {
         const { connectorType, marketType, symbols, intervals } = options
         return await this.connectorService.updateSubscribeCollection(connectorType, marketType, symbols, intervals);
     }
@@ -157,7 +157,44 @@ export class DetectorService {
                     isActive: false
                 }
             },
-            advisor: undefined,
+            advisor: {
+                key: '',
+                restApiUrl: '',
+                providerApi: '',
+                connectorTypes: [],
+                marketTypes: [],
+                takeProfitPercent: 0,
+                stopLossPercent: 0,
+                commisions: [],
+                aiIntegration: {
+                    apiKey: '',
+                    defaultModel: '',
+                    responseTemperature: 0,
+                    maxTokens: 0,
+                    supportedFeatures: []
+                },
+                cacheSettings: {
+                    cacheHost: '',
+                    cachePort: 0,
+                    defaultTTL: 0
+                },
+                scenarioAnalysis: {
+                    enabled: false,
+                    predefinedScenarios: [],
+                    maxAnalysisDepth: 0,
+                    customScenarios: []
+                },
+                logging: {
+                    verbose: false,
+                    logFilePath: '',
+                    externalMonitoring: false
+                },
+                portfolioOptimization: {
+                    enabled: false,
+                    riskTolerance: 'low',
+                    strategies: []
+                }
+            },
             restApiUrl: '',
             providers: [],
             symbols: [],
@@ -292,41 +329,42 @@ export class DetectorService {
         const detector = await this.getDetector({ sysname });
 
         for (const provider of detector.providers) {
-            for (const connector of provider.connectors) {
-                for (const market of connector.markets) {
+            if (provider.connectors)
+                for (const connector of provider.connectors) {
+                    for (const market of connector.markets) {
 
-                    const connectorLastTrade = await this.connectorService.getPrices(
-                        connector.connectorType,
-                        market.marketType,
-                        market.symbols
-                    );
-                    const detectorLastPrice = await this.getPrices({ sysname, symbols: detector.symbols });
+                        const connectorLastTrade = await this.connectorService.getPrices(
+                            connector.connectorType,
+                            market.marketType,
+                            market.symbols
+                        );
+                        const detectorLastPrice = await this.getPrices({ sysname, symbols: detector.symbols });
 
-                    for (const symbol of detector.symbols) {
-                        const value: any = {
-                            name: symbol.name,
-                            leverage: symbol.leverage,
-                            defaultQuantity: symbol.quantity,
-                            intervals: detector.intervals,
-                            orders: [],
-                            connectorLastTrade: connectorLastTrade[symbol.name]
-                                ? {
-                                    value: connectorLastTrade[symbol.name].value,
-                                    moment: connectorLastTrade[symbol.name].moment,
-                                }
-                                : { value: 0, moment: null },
-                            detectorLastPrice: detectorLastPrice[symbol.name]
-                                ? {
-                                    value: detectorLastPrice[symbol.name].value,
-                                    moment: detectorLastPrice[symbol.name].moment,
-                                }
-                                : { value: 0, moment: null },
-                        };
+                        for (const symbol of detector.symbols) {
+                            const value: any = {
+                                name: symbol.name,
+                                leverage: symbol.leverage,
+                                defaultQuantity: symbol.quantity,
+                                intervals: detector.intervals,
+                                orders: [],
+                                connectorLastTrade: connectorLastTrade[symbol.name]
+                                    ? {
+                                        value: connectorLastTrade[symbol.name].value,
+                                        moment: connectorLastTrade[symbol.name].moment,
+                                    }
+                                    : { value: 0, moment: null },
+                                detectorLastPrice: detectorLastPrice[symbol.name]
+                                    ? {
+                                        value: detectorLastPrice[symbol.name].value,
+                                        moment: detectorLastPrice[symbol.name].moment,
+                                    }
+                                    : { value: 0, moment: null },
+                            };
 
-                        result.push(value);
+                            result.push(value);
+                        }
                     }
                 }
-            }
         }
 
         return result;
@@ -351,8 +389,10 @@ export class DetectorService {
     async update(name: string, options: Detector): Promise<any> {
 
         let detector = await this.detectorRepository.findOne({ where: { name } });
-        detector.options = options
-        if (detector) await this.detectorRepository.update(detector.id, detector);
+        if (detector) {
+            detector.options = options
+            await this.detectorRepository.update(detector.id, detector);
+        }
         return detector;
     }
 

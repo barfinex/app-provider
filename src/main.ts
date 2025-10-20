@@ -24,7 +24,7 @@ async function bootstrap() {
         cert: fs.readFileSync(resolve(process.cwd(), process.env.SSL_CERT)),
       };
       console.log('✅ HTTPS включён (сертификаты загружены)');
-    } catch (e) {
+    } catch (e: any) {
       console.warn(
         `⚠️ Не удалось загрузить сертификаты (${process.env.SSL_KEY}, ${process.env.SSL_CERT}):`,
         e.message,

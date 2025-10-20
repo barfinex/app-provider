@@ -77,18 +77,19 @@ export class DetectorController {
         const activeSymbols = await this.detectorService.getAllActiveSymbols();
 
         for (const provider of options.providers) {
-            for (const connector of provider.connectors) {
-                for (const market of connector.markets) {
+            if (provider.connectors)
+                for (const connector of provider.connectors) {
+                    for (const market of connector.markets) {
 
-                    await this.detectorService.updateSubscribeCollectionInConnector({
-                        connectorType: connector.connectorType,
-                        marketType: market.marketType,
-                        symbols: activeSymbols,
-                        intervals: null,
-                    });
+                        await this.detectorService.updateSubscribeCollectionInConnector({
+                            connectorType: connector.connectorType,
+                            marketType: market.marketType,
+                            symbols: activeSymbols,
+                            intervals: options.intervals
+                        });
 
+                    }
                 }
-            }
         }
 
         return detectorEntity;
@@ -101,29 +102,30 @@ export class DetectorController {
         const detector = await this.detectorService.getDetector({ key });
 
         for (const provider of detector.providers) {
-            for (const connector of provider.connectors) {
-                for (const market of connector.markets) {
+            if (provider.connectors)
+                for (const connector of provider.connectors) {
+                    for (const market of connector.markets) {
 
-                    await this.detectorService.deleteAllOrders({
-                        connectorType: connector.connectorType,
-                        marketType: market.marketType,
-                        symbols: market.symbols,
-                        sysname: detector.sysname,
-                    });
+                        await this.detectorService.deleteAllOrders({
+                            connectorType: connector.connectorType,
+                            marketType: market.marketType,
+                            symbols: market.symbols,
+                            sysname: detector.sysname,
+                        });
 
-                    // Delete the detector
-                    isDelete = await this.detectorService.delete(key);
+                        // Delete the detector
+                        isDelete = await this.detectorService.delete(key);
 
-                    // Update subscription collection in the connector
-                    const activeSymbols = await this.detectorService.getAllActiveSymbols();
-                    await this.detectorService.updateSubscribeCollectionInConnector({
-                        connectorType: connector.connectorType,
-                        marketType: market.marketType,
-                        symbols: activeSymbols,
-                        intervals: null,
-                    });
+                        // Update subscription collection in the connector
+                        const activeSymbols = await this.detectorService.getAllActiveSymbols();
+                        await this.detectorService.updateSubscribeCollectionInConnector({
+                            connectorType: connector.connectorType,
+                            marketType: market.marketType,
+                            symbols: activeSymbols,
+                            intervals: detector.intervals
+                        });
+                    }
                 }
-            }
         }
 
         return isDelete;

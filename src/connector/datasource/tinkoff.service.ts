@@ -64,16 +64,16 @@ export class TinkoffService implements OnModuleInit, DataSource {
     }
 
     async closeAllOrders(options: { symbol: Symbol, marketType: MarketType }): Promise<void> {
-        return null;
+        // return null;
     }
 
     public async getOpenOrders(options: { symbol: Symbol, detectorSysname: string, marketType: MarketType }): Promise<Order[]> {
-        return null;
+        return [];
 
     }
 
     public async updateSubscribeCollection(marketType: MarketType, symbols: Symbol[]) {
-        return null;
+        // return null;
     }
 
     unregisterEvents(symbol: Symbol) {
@@ -86,7 +86,7 @@ export class TinkoffService implements OnModuleInit, DataSource {
     }
 
     public async placeOrder(order: Order, options: Connector): Promise<Order> {
-        return null;
+        return {} as Order;
     }
 
     public prepareLots(lots: number, instrumentId: string) {

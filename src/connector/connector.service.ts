@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import {
     Asset,
     Connector,
@@ -14,6 +14,7 @@ import {
     OrderSource,
     Symbol,
     SubscriptionValue,
+    ConnectorMarket,
 } from '@barfinex/types';
 import { makeConnectorKey } from './connector-key.util';
 import { ClientProxy } from '@nestjs/microservices';
@@ -43,9 +44,14 @@ export class ConnectorService {
     static connectors: { [key: string]: Connector } = {}
     static key: string;
 
-    static getConnector(options: { connectorType: ConnectorType, marketType?: MarketType }): Connector {
+    static getConnector(options: { connectorType: ConnectorType; marketType?: MarketType }): Connector | undefined {
+        if (!options.marketType) {
+            console.warn(`No marketType provided for connector ${options.connectorType}`);
+            return undefined;
+        }
+
         const key = makeConnectorKey(options.connectorType, options.marketType);
-        return this.connectors[key]
+        return this.connectors[key];
     }
 
     static setConnector(options: { connectorType: ConnectorType, marketType: MarketType, connector: Connector }): void {
@@ -64,7 +70,15 @@ export class ConnectorService {
     }
 
     static getAccount(connectorType: ConnectorType, marketType: MarketType): Account {
-        return this.accounts.find(q => q.connectorType == connectorType && q.marketType == marketType)
+        const account = this.accounts.find(
+            q => q.connectorType === connectorType && q.marketType === marketType
+        );
+
+        if (!account) {
+            throw new Error(`Account not found for ${connectorType}/${marketType}`);
+        }
+
+        return account;
     }
 
     static setAccount(account: Account): void {
@@ -101,12 +115,35 @@ export class ConnectorService {
 
     }
 
-    static getSubscription(options: { connectorType: ConnectorType, marketType: MarketType, subscriptionType: SubscriptionType }): Subscription {
-
+    static getSubscription(options: {
+        connectorType: ConnectorType;
+        marketType: MarketType;
+        subscriptionType: SubscriptionType;
+    }): Subscription {
         const key = makeConnectorKey(options.connectorType, options.marketType);
+        const connector = this.connectors[key];
 
-        return this.connectors[key].subscriptions.find(q => q.type == options.subscriptionType)
+        if (!connector) {
+            throw new Error(`[ConnectorService] Connector not found: ${key}`);
+        }
+
+        if (!connector.subscriptions || connector.subscriptions.length === 0) {
+            throw new Error(`[ConnectorService] No subscriptions for connector: ${key}`);
+        }
+
+        const subscription = connector.subscriptions.find(
+            q => q.type === options.subscriptionType
+        );
+
+        if (!subscription) {
+            throw new Error(
+                `[ConnectorService] Subscription not found for ${options.subscriptionType} on ${key}`
+            );
+        }
+
+        return subscription;
     }
+
 
 
 
@@ -147,32 +184,38 @@ export class ConnectorService {
     }
 
 
-    async changeLeverage(connectorType: ConnectorType, symbol: Symbol, newLeverage: number): Promise<Symbol> {
+    async changeLeverage(
+        connectorType: ConnectorType,
+        symbol: Symbol,
+        newLeverage: number
+    ): Promise<Symbol> {
         switch (connectorType) {
             case ConnectorType.binance:
-                return await this.binanceService.changeLeverage(symbol, newLeverage)
-                break;
+                return await this.binanceService.changeLeverage(symbol, newLeverage);
+
             case ConnectorType.testnetBinanceFutures:
-                return await this.testnetBinanceFuturesService.changeLeverage(symbol, newLeverage)
-                break;
+                return await this.testnetBinanceFuturesService.changeLeverage(symbol, newLeverage);
+
             default:
-                return null
-                break;
+                throw new Error(`[ConnectorService] Unsupported connector type: ${connectorType}`);
         }
     }
 
-    async getAssetsInfo(connectorType: ConnectorType, marketType: MarketType): Promise<{ assets: Asset[], positions: Position[] }> {
 
+    async getAssetsInfo(
+        connectorType: ConnectorType,
+        marketType: MarketType
+    ): Promise<{ assets: Asset[]; positions: Position[] }> {
         switch (connectorType) {
             case ConnectorType.binance:
-                return await this.binanceService.getAssetsInfo(marketType)
-                break;
+                return await this.binanceService.getAssetsInfo(marketType);
+
             case ConnectorType.testnetBinanceFutures:
-                return await this.testnetBinanceFuturesService.getAssetsInfo(marketType)
-                break;
+                return await this.testnetBinanceFuturesService.getAssetsInfo(marketType);
+
             default:
-                return null
-                break;
+                this.logger.error(`[ConnectorService] Unsupported connector: ${connectorType}`);
+                throw new BadRequestException(`Unsupported connector type: ${connectorType}`);
         }
     }
 
@@ -214,33 +257,38 @@ export class ConnectorService {
     }
 
 
-    async getPrices(connectorType: ConnectorType, marketType: MarketType, symbols: Symbol[]): Promise<{ [index: string]: { value: number, moment: number } }> {
-
+    async getPrices(
+        connectorType: ConnectorType,
+        marketType: MarketType,
+        symbols: Symbol[]
+    ): Promise<{ [index: string]: { value: number; moment: number } }> {
         switch (connectorType) {
             case ConnectorType.binance:
-                return await this.binanceService.getPrices(marketType, symbols)
-                break;
+                return await this.binanceService.getPrices(marketType, symbols);
+
             case ConnectorType.testnetBinanceFutures:
-                return await this.testnetBinanceFuturesService.getPrices(marketType, symbols)
-                break;
+                return await this.testnetBinanceFuturesService.getPrices(marketType, symbols);
+
             default:
-                return null
-                break;
+                this.logger.error(`[ConnectorService] Unsupported connector: ${connectorType}`);
+                throw new BadRequestException(`Unsupported connector type: ${connectorType}`);
         }
     }
 
-    public async getAllOpenOrders(options: { connectorType: ConnectorType, marketType: MarketType }): Promise<Order[]> {
-
+    public async getAllOpenOrders(options: {
+        connectorType: ConnectorType;
+        marketType: MarketType;
+    }): Promise<Order[]> {
         switch (options.connectorType) {
             case ConnectorType.binance:
-                return await this.binanceService.getOpenOrders({ marketType: options.marketType })
-                break;
+                return await this.binanceService.getOpenOrders({ marketType: options.marketType });
+
             case ConnectorType.testnetBinanceFutures:
-                return await this.testnetBinanceFuturesService.getOpenOrders({ marketType: options.marketType })
-                break;
+                return await this.testnetBinanceFuturesService.getOpenOrders({ marketType: options.marketType });
+
             default:
-                return null
-                break;
+                this.logger.error(`[ConnectorService] Unsupported connector type: ${options.connectorType}`);
+                throw new BadRequestException(`Unsupported connector type: ${options.connectorType}`);
         }
     }
 
@@ -277,14 +325,15 @@ export class ConnectorService {
 
                 const symbols: Symbol[] = [];
 
-                connector.assets.forEach((asset) => {
-                    if (asset.symbol.name !== exchangeCurrency) {
-                        symbols.push({ name: asset.symbol.name + exchangeCurrency });
-                        this.logger.debug(
-                            `Added asset symbol: ${asset.symbol.name + exchangeCurrency}`,
-                        );
-                    }
-                });
+                if (connector.assets)
+                    connector.assets.forEach((asset) => {
+                        if (asset.symbol.name !== exchangeCurrency) {
+                            symbols.push({ name: asset.symbol.name + exchangeCurrency });
+                            this.logger.debug(
+                                `Added asset symbol: ${asset.symbol.name + exchangeCurrency}`,
+                            );
+                        }
+                    });
 
                 connector.markets.forEach((market) => {
                     this.logger.log(
@@ -316,14 +365,15 @@ export class ConnectorService {
                         });
                     });
 
-                    connector.positions.forEach((position) => {
-                        if (!symbols.find((q) => q === position.symbol)) {
-                            symbols.push(position.symbol);
-                            this.logger.debug(
-                                `Added position symbol: ${position.symbol.name}`,
-                            );
-                        }
-                    });
+                    if (connector.positions)
+                        connector.positions.forEach((position) => {
+                            if (!symbols.find((q) => q === position.symbol)) {
+                                symbols.push(position.symbol);
+                                this.logger.debug(
+                                    `Added position symbol: ${position.symbol.name}`,
+                                );
+                            }
+                        });
 
                     const preparedConnector: Connector = {
                         connectorType: connector.connectorType,
@@ -341,7 +391,7 @@ export class ConnectorService {
                         connector: preparedConnector,
                     });
 
-                    if (connector.assets?.length > 0) {
+                    if (connector.assets) {
                         const defaultSymbol = 'BTCUSDT';
                         if (!symbols.find((q) => q.name === defaultSymbol)) {
                             symbols.push({ name: defaultSymbol });
@@ -433,83 +483,130 @@ export class ConnectorService {
 
 
     async openOrder(order: Order): Promise<Order> {
+        const subscriptionType = SubscriptionType.PROVIDER_ORDER_CREATE;
+        const subscriptionValue: SubscriptionValue = {
+            value: order,
+            options: {
+                connectorType: order.connectorType,
+                marketType: order.marketType,
+                key: this.key,
+                updateMoment: Date.now(),
+            },
+        };
 
-        const subscriptionType = SubscriptionType.PROVIDER_ORDER_CREATE
-        const subscriptionValue: SubscriptionValue = { value: order, options: { connectorType: order.connectorType, marketType: order.marketType, key: this.key, updateMoment: Date.now() } }
+        let result: Order;
 
         switch (order.connectorType) {
             case ConnectorType.binance:
-                return await this.binanceService.openOrder(order)
+                result = await this.binanceService.openOrder(order);
                 break;
             case ConnectorType.alpaca:
-                return await this.alpacaService.openOrder(order)
+                result = await this.alpacaService.openOrder(order);
                 break;
             case ConnectorType.tinkoff:
-                return await this.tinkoffService.openOrder(order)
+                result = await this.tinkoffService.openOrder(order);
                 break;
             case ConnectorType.testnetBinanceFutures:
-                return await this.testnetBinanceFuturesService.openOrder(order)
+                result = await this.testnetBinanceFuturesService.openOrder(order);
                 break;
+            default:
+                throw new BadRequestException(`Unsupported connector type: ${order.connectorType}`);
         }
 
-        this.isEmitToRedisEnabled && this.client.emit(subscriptionType, subscriptionValue)
+        if (this.isEmitToRedisEnabled) {
+            this.client.emit(subscriptionType, subscriptionValue);
+        }
+
+        return result;
     }
 
 
 
 
-    async getOpenOrders(options: { symbol: Symbol, source: OrderSource, connectorType: ConnectorType, marketType: MarketType }): Promise<Order[]> {
-
-        const { symbol, source, connectorType, marketType } = options
+    async getOpenOrders(options: {
+        symbol: Symbol;
+        source: OrderSource;
+        connectorType: ConnectorType;
+        marketType: MarketType;
+    }): Promise<Order[]> {
+        const { symbol, source, connectorType, marketType } = options;
 
         switch (connectorType) {
             case ConnectorType.binance:
-                return await this.binanceService.getOpenOrders({ symbol, marketType })
-                break;
+                return await this.binanceService.getOpenOrders({ symbol, marketType });
+
             case ConnectorType.alpaca:
-                return []
-                break;
+                return [];
+
             case ConnectorType.tinkoff:
-                return []
-                break;
+                return [];
+
             case ConnectorType.testnetBinanceFutures:
-                return await this.testnetBinanceFuturesService.getOpenOrders({ symbol, marketType })
-                break;
+                return await this.testnetBinanceFuturesService.getOpenOrders({ symbol, marketType });
+
+            default:
+                throw new BadRequestException(`Unsupported connector type: ${connectorType}`);
         }
     }
 
     async closeOrder(order: Order): Promise<Order> {
+        const { externalId, symbol, connectorType, marketType, source } = order;
 
-        const subscriptionType = SubscriptionType.PROVIDER_ORDER_CLOSE
-
-        const { externalId: id, symbol, connectorType, marketType, source } = order
+        // строгая проверка входных данных
+        if (!externalId) {
+            throw new BadRequestException('Order.externalId is required to close order');
+        }
+        if (!symbol) {
+            throw new BadRequestException('Order.symbol is required to close order');
+        }
 
         let result: Order = {
             useSandbox: false,
             connectorType,
             marketType,
             source,
-        }
+        };
 
         switch (connectorType) {
             case ConnectorType.binance:
-                result = await this.binanceService.closeOrder({ id, symbol, marketType })
+                result = await this.binanceService.closeOrder({
+                    id: externalId,
+                    symbol,
+                    marketType,
+                });
                 break;
-            case ConnectorType.alpaca:
-                return
-                break;
-            case ConnectorType.tinkoff:
-                return
-                break;
+
             case ConnectorType.testnetBinanceFutures:
-                result = await this.testnetBinanceFuturesService.closeOrder({ id, symbol, marketType })
+                result = await this.testnetBinanceFuturesService.closeOrder({
+                    id: externalId,
+                    symbol,
+                    marketType,
+                });
                 break;
+
+            case ConnectorType.alpaca:
+            case ConnectorType.tinkoff:
+                throw new BadRequestException(`closeOrder not supported for ${connectorType}`);
+
+            default:
+                throw new BadRequestException(`Unsupported connector type: ${connectorType}`);
         }
 
-        const subscriptionValue: SubscriptionValue = { value: result, options: { connectorType: result.connectorType, marketType: result.marketType, key: this.key, updateMoment: Date.now() } }
-        this.isEmitToRedisEnabled && this.client.emit(subscriptionType, subscriptionValue)
+        const subscriptionValue: SubscriptionValue = {
+            value: result,
+            options: {
+                connectorType: result.connectorType,
+                marketType: result.marketType,
+                key: this.key,
+                updateMoment: Date.now(),
+            },
+        };
 
-        return result
+        if (this.isEmitToRedisEnabled) {
+            this.client.emit(SubscriptionType.PROVIDER_ORDER_CLOSE, subscriptionValue);
+        }
+
+        return result;
     }
 
     async closeAllOrders(options: { symbol: Symbol, connectorType: ConnectorType, marketType: MarketType }): Promise<void> {
@@ -569,7 +666,7 @@ export class ConnectorService {
     }
 
 
-    async updateSubscribeCollection(connectorType: ConnectorType, marketType: MarketType, symbols: Symbol[], intervals: TimeFrame[]): Promise<void> {
+    async updateSubscribeCollection(connectorType: ConnectorType, marketType: MarketType, symbols: Symbol[], intervals?: TimeFrame[]): Promise<void> {
 
         switch (connectorType) {
             case ConnectorType.binance:
@@ -598,65 +695,85 @@ export class ConnectorService {
         return result
     }
 
-    async get(options: { connectorType: ConnectorType, marketType?: MarketType }): Promise<Connector> {
-        const { connectorType, marketType } = options
-        let connector = ConnectorService.getConnector({ connectorType, marketType })
+    async get(options: { connectorType: ConnectorType; marketType?: MarketType }): Promise<Connector> {
+        const { connectorType, marketType } = options;
+        const connector = ConnectorService.getConnector({ connectorType, marketType });
 
-        if (marketType) connector.markets = connector.markets.filter(market => market.marketType === marketType);
+        if (!connector) {
+            throw new Error(`Connector not found for ${connectorType}${marketType ? ' ' + marketType : ''}`);
+        }
 
-        return connector
+        if (marketType) {
+            connector.markets = connector.markets.filter(market => market.marketType === marketType);
+        }
+
+        return connector;
     }
 
 
     async getConnectorsList(): Promise<Connector[]> {
         const accounts = await this.accountService.getAll();
+        const connectors: Connector[] = [];
 
+        for (const account of accounts) {
+            if (!account.connectorType) continue; // ⚙️ пропускаем, если не указан тип коннектора
 
-        const connectors: Connector[] = []
+            const connectorIndex = connectors.findIndex(
+                (q) => q.connectorType === account.connectorType
+            );
 
-        accounts.forEach(account => {
-            const connectorIndex = connectors.findIndex(q => q.connectorType == account.connectorType)
+            if (!account.connectorType || !account.marketType) continue;
 
-            const market: any = {
+            const market: ConnectorMarket = {
                 marketType: account.marketType,
-                symbols: account.symbols
-            }
+                symbols: account.symbols ?? [],
+            };
 
             if (connectorIndex > -1) {
-                connectors[connectorIndex].assets.push(...account.assets)
-                connectors[connectorIndex].positions.push(...account.positions)
-                connectors[connectorIndex].orders.push(...account.orders)
+                const connector = connectors[connectorIndex];
 
-                const marketIndex = connectors[connectorIndex].markets.findIndex(q => q.marketType == market.marketType)
+                // ⚙️ безопасно инициализируем опциональные массивы
+                connector.assets ??= [];
+                connector.positions ??= [];
+                connector.orders ??= [];
+
+                connector.assets.push(...(account.assets ?? []));
+                connector.positions.push(...(account.positions ?? []));
+                connector.orders.push(...(account.orders ?? []));
+
+                const marketIndex = connector.markets.findIndex(
+                    (m) => m.marketType === market.marketType
+                );
 
                 if (marketIndex > -1) {
-                    connectors[connectorIndex].markets[marketIndex].symbols.push(
-                        ...market.symbols.filter(
-                            symbol => !connectors[connectorIndex].markets[marketIndex].symbols.includes(symbol)
-                        )
-                    )
+                    const targetMarket = connector.markets[marketIndex];
+
+                    // ✅ Добавляем только новые символы (без дубликатов)
+                    const existingSymbols = new Set(targetMarket.symbols.map((s) => s.name));
+                    const newSymbols = (market.symbols ?? []).filter(
+                        (s) => !existingSymbols.has(s.name)
+                    );
+
+                    targetMarket.symbols.push(...newSymbols);
                 } else {
-                    connectors[connectorIndex].markets.push(market)
+                    connector.markets.push(market);
                 }
-
             } else {
-
+                // ✅ создаём новый connector строго по типу
                 const connector: Connector = {
-                    markets: [{ ...market }],
                     connectorType: account.connectorType,
-                    isActive: account.isActive,
-                    assets: account?.assets,
-                    positions: account?.positions,
-                    orders: account?.orders,
-                    subscriptions: []
-                }
+                    markets: [market],
+                    isActive: account.isActive ?? false,
+                    assets: account.assets ?? [],
+                    positions: account.positions ?? [],
+                    orders: account.orders ?? [],
+                    subscriptions: [],
+                };
 
                 connectors.push(connector);
             }
+        }
 
-        });
-
-
-        return connectors
+        return connectors;
     }
 }

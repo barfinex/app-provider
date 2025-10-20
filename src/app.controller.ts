@@ -18,13 +18,11 @@ export class AppController {
 
         const provider: Provider = {
             key: this.connectorService.key,
-            restApiUrl: null,
+            // restApiUrl: null,
             // restApiToken: process.env.PROVIDER_API_TOKEN,
             // restApiUrl: '',
             // key: null,
-            restApiToken: null,
-
-
+            // restApiToken: null,
             connectors,
             detectors,
             accounts,
@@ -35,6 +33,8 @@ export class AppController {
             studioName: '',
             studioDescription: '',
             studioSocketApiUrl: '',
+            restApiToken: '',
+            restApiUrl: ''
         };
 
         return provider;

@@ -1,64 +1,19 @@
-import { ConsoleLogger, Inject, Injectable, forwardRef } from '@nestjs/common';
+import { Inject, Injectable, forwardRef } from '@nestjs/common';
 import {
-    Candle,
-    Connector,
-    OrderBook,
-    Asset,
     OrderType,
     OrderSide,
     Order,
-    PluginHook,
-    PluginInterface,
-    SnapshotData,
-    TimeFrame,
-    History,
     MarketType,
-    HistoryRequest,
     ConnectorType,
-    Detector,
-    OrderEnv,
-    SubscriptionType,
     OrderSourceType,
     OrderSource,
     Symbol
 } from '@barfinex/types';
-//import { Model } from 'mongoose';
-import Binance, {
-    BidDepth as BinanceBidDepth,
-    Candle as BinanceCandle,
-    CandleChartInterval,
-    Depth as BinanceDepth,
-    Trade as BinanceTrade,
-    AggregatedTrade as BinanceAggregatedTrade,
-    ExchangeInfo,
-    FuturesOrder,
-    // FuturesOrderType_LT,
-    NewFuturesOrder,
-    NewOrderMargin,
-    NewOrderMarketBase,
-    NewOrderRespType,
-    Order as BinanceOrder,
-    OrderSide as BinanceOrderSide,
-    OrderType as BinanceOrderType,
-    PositionSide,
-    SideEffectType,
-    MarketNewFuturesOrder,
-    LimitNewFuturesOrder,
-    TakeProfitNewFuturesOrder,
-    StopNewFuturesOrder,
-    NewOrderSpot,
-    NewOrderSL,
-    NewOrderLimit,
-} from 'binance-api-node';
 import { OrderEntity } from './order.entity';
-// import { isThisQuarter } from 'date-fns';
-import { Repository, In } from 'typeorm';
+import { Repository } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import { paginate } from '../common/pagination/paginate';
-// import { detectContentType } from 'next/dist/server/image-optimizer';
-import { ClientProxy } from '@nestjs/microservices';
 import { ConnectorService } from '../connector/connector.service';
-// import mongoose from "mongoose";
 import { ObjectId } from "typeorm";
 import moment from 'moment';
 import 'moment-timezone';
@@ -115,14 +70,13 @@ export class OrderService {
 
             orderEntitis[0].map(orderEntity => this.orderEntityToOrder(orderEntity))
                 .forEach(order => {
-                    data.push({ id: order.id, order })
-                    //data.unshift({ id: order.id, order })
+                    if (order.id) data.push({ id: order.id, order })
                 });
 
         } else {
 
-            let entityOrders: OrderEntity[]
-            let connectorOrders: Order[]
+            let entityOrders: OrderEntity[] = []
+            let connectorOrders: Order[] = []
 
             if (symbol) {
                 entityOrders = await this.orderRepository.find({ where: { sourceSysname, sourceType, symbol: symbol.name, connectorType, marketType }, order: { time: 'DESC' } });
@@ -144,21 +98,22 @@ export class OrderService {
             for (let i = 0; i < connectorOrders.length; i++) {
                 const order = connectorOrders[i];
 
-                const orderEntity = entityOrders.find(q => q.externalId == order.externalId.toString() && q.connectorType == connectorType && q.marketType == marketType)
+                if (order.externalId) {
+                    const orderEntity = entityOrders.find(q => q.externalId == order.externalId && q.connectorType == connectorType && q.marketType == marketType)
+                    console.log('getOpenOrder');
 
-                console.log('getOpenOrder');
+                    if (orderEntity) {
+                        // update Entity
+                        order.id = orderEntity.id.toString()
+                        await this.orderRepository.update(order.id, this.orderToOrderEntity(order))
+                    }
+                    else {
+                        // create Entity
+                        order.id = (this.orderRepository.create(this.orderToOrderEntity(order))).id.toString()
+                    }
 
-                if (orderEntity) {
-                    // update Entity
-                    order.id = orderEntity.id.toString()
-                    await this.orderRepository.update(order.id, this.orderToOrderEntity(order))
+                    data.push({ id: order.id, order });
                 }
-                else {
-                    // create Entity
-                    order.id = (this.orderRepository.create(this.orderToOrderEntity(order))).id.toString()
-                }
-
-                data.push({ id: order.id, order });
             }
 
             // delete Entity
@@ -228,21 +183,21 @@ export class OrderService {
     //    async closeOrder(options: { id?: number, externalId?: string, symbol: Symbol, connectorType?: ConnectorType, marketType?: MarketType, source: OrderSource }): Promise<Order> {
     async closeOrder(order: Order): Promise<Order> {
 
-        let result: Order = null
+        let result: Order = {} as Order
 
-        let { id, externalId, symbol, connectorType, marketType, source } = order
-
-        let orderEntity: OrderEntity = null
+        let orderEntity: OrderEntity | null = null;
 
         if (order.id) {
-            orderEntity = await this.orderRepository.findOne({ where: { id: new ObjectId(id) } })
-            order.externalId = orderEntity.externalId
-            orderEntity.closeTime = moment(moment.utc(new Date()).format('YYYY-MM-DD HH:mm:ss')).unix()
+            orderEntity = await this.orderRepository.findOne({ where: { id: new ObjectId(order.id) } })
+            if (orderEntity) {
+                order.externalId = orderEntity.externalId
+                orderEntity.closeTime = moment(moment.utc(new Date()).format('YYYY-MM-DD HH:mm:ss')).unix()
+            }
         }
 
         if (order.externalId) await this.connectorService.closeOrder(order)
 
-        if (orderEntity) {
+        if (orderEntity && order.id) {
             await this.orderRepository.update(order.id, orderEntity)
             result = this.orderEntityToOrder(orderEntity)
         }
@@ -255,19 +210,19 @@ export class OrderService {
         const { id, order } = options
         order.id = id
 
-        const orderEntity = await this.orderRepository.findOne({ where: { id: new ObjectId(id) } })
+        const orderEntity: OrderEntity | null = await this.orderRepository.findOne({ where: { id: new ObjectId(id) } })
 
-        if (!orderEntity.useSandbox) {
+        if (orderEntity && !orderEntity.useSandbox) {
             await this.connectorService.closeOrder(this.orderEntityToOrder(orderEntity))
 
             const newOrder = await this.openOrder(order)
-            order.externalId = newOrder.id.toString()
+            if (newOrder.id) {
+                order.externalId = newOrder.id.toString()
+            }
         }
 
         console.log('updateOrder');
-
         await this.orderRepository.update(id, this.orderToOrderEntity(order))
-
         return order;
     }
 
@@ -313,28 +268,28 @@ export class OrderService {
     async get(id: string): Promise<Order> {
 
         const orderEntity = await this.orderRepository.findOne({ where: { id: new ObjectId(id) } })
-
-        return this.orderEntityToOrder(orderEntity)
+        if (orderEntity)
+            return this.orderEntityToOrder(orderEntity)
+        else throw new Error('Order not found')
     }
 
     private orderToOrderEntity(order: Order): OrderEntity {
 
         console.log("order:", order);
-
-
+        
         let result: OrderEntity = {
-            id: (order.id) ? new ObjectId(order.id) : null,
+            id: (order.id) ? new ObjectId(order.id) : new ObjectId(),
             externalId: (order.externalId) ? order.externalId : null,
             connectorType: order.connectorType.toString(),
             marketType: order.marketType.toString(),
-            symbol: order.symbol.name,
-            side: order.side,
-            type: order.type,
-            price: order.price,
+            symbol: (order.symbol) ? order.symbol.name : '',
+            side: order.side?.toString() ?? null,
+            type: order.type?.toString() ?? null,
+            price: order.price ?? null,
             sourceSysname: order.source.key,
             sourceType: order.source.type,
-            sourceBaseApiUrl: order.source.restApiUrl,
-            time: +order.time,
+            sourceBaseApiUrl: (order.source.restApiUrl) ? order.source.restApiUrl : '',
+            time: (order.time) ? +order.time : moment.utc(new Date()).unix(),
             updateTime: (order.updateTime) ? order.updateTime : null,
             quantity: (order.quantity) ? order.quantity : null,
             quantityExecuted: (order.quantityExecuted) ? order.quantityExecuted : null,

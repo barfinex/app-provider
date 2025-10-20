@@ -38,7 +38,7 @@ export class AssetService {
         return await this.accountService.getAssetsInfo(connector)
     }
 
-    async getAll(): Promise<string[]> {
+    async getAll(): Promise<{ connectorType: string; marketType: string; details: any; }[]> {
 
         const result = [];
 
@@ -52,12 +52,12 @@ export class AssetService {
             for (let j = 0; j < marketTypes.length; j++) {
                 const marketType = marketTypes[j];
 
-                //const details = await this.getAllAsset(ConnectorType[connectorType], MarketType[marketType])
+                const details = await this.getAllAsset(ConnectorType[connectorType as keyof typeof ConnectorType], MarketType[marketType as keyof typeof MarketType])
 
                 result.push({
                     connectorType,
                     marketType,
-                    //details
+                    details
                 });
 
             }

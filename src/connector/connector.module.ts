@@ -17,7 +17,7 @@ import { BinanceService, TinkoffService, AlpacaService, TestnetBinanceFuturesSer
 import { WebSocketService } from './datasource/websocket.service';
 import { AccountService } from '../account/account.service';
 
-import { ConfigModule } from '@barfinex/config/config.module';
+import { ConfigModule } from '@barfinex/config';
 import { KeyModule } from '@barfinex/key';
 
 @Module({
@@ -31,7 +31,7 @@ import { KeyModule } from '@barfinex/key';
         transport: Transport.REDIS,
         options: {
           host: process.env.REDIS_HOST,
-          port: +process.env.REDIS_PORT,
+          port: +(process.env.REDIS_PORT ?? 6379),
           retryAttempts: 10,
           retryDelay: 5000,
         },

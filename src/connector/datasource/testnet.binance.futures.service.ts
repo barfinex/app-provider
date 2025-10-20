@@ -1,27 +1,16 @@
-import { ConsoleLogger, Inject, Injectable, InternalServerErrorException, Logger, OnModuleInit } from "@nestjs/common";
+import { Inject, Injectable, InternalServerErrorException, Logger, NotFoundException, OnModuleInit } from "@nestjs/common";
 import { AppError, ErrorEnvironment } from '../../error';
 import Binance, {
     BidDepth as BinanceBidDepth,
     Candle as BinanceCandle,
     CandleChartInterval,
     Depth as BinanceDepth,
-    Trade as BinanceTrade,
     AggregatedTrade as BinanceAggregatedTrade,
-
-    // OutboundAccountInfo, | ExecutionReport | AccountUpdate | OrderUpdate | AccountConfigUpdate | MarginCall
-
     ExchangeInfo,
     FuturesOrder,
-    // FuturesOrderType_LT,
     NewFuturesOrder,
-    NewOrderMargin,
     NewOrderMarketBase,
-    NewOrderRespType,
-    Order as OrderBinance,
-    OrderSide as OrderSideBinance,
     OrderType as BinanceOrderType,
-    PositionSide,
-    SideEffectType,
     NewOrderSpot,
     NewOrderLimit,
     NewOrderSL,
@@ -39,20 +28,15 @@ import Binance, {
     TakeProfitMarketNewFuturesOrder,
     StopMarketNewFuturesOrder
 } from 'binance-api-node';
-import BinanceApi from 'binance-api-node'
-import binance from 'binance-api-node'
-//import { EventEmitter2, OnEvent } from "@nestjs/event-emitter";
 import { ClientProxy } from '@nestjs/microservices';
 import {
     DataSource,
     Order,
-    Connector,
     OrderSide,
     OrderType,
     TimeFrame,
     CandleHandler,
     OrderBookHandler,
-    AccountHandler,
     TradeHandler,
     DepthOrder,
     Candle,
@@ -71,15 +55,12 @@ import {
     OrderSourceType,
     Symbol,
     SymbolPrice,
-    SubscriptionValue,
+    SubscriptionValue
 } from '@barfinex/types';
 import moment from 'moment';
 import { ConnectorService } from "../connector.service";
 import { ConfigService } from "@barfinex/config";
 import { candleMapper } from "@barfinex/utils";
-
-
-
 
 @Injectable()
 export class TestnetBinanceFuturesService implements OnModuleInit, DataSource {
@@ -89,7 +70,7 @@ export class TestnetBinanceFuturesService implements OnModuleInit, DataSource {
 
     private readonly isEmitToRedisEnabled = false
     private subscription: {
-        options?: { symbols: Symbol[], intervals: TimeFrame[] }
+        options?: { symbols: Symbol[], intervals?: TimeFrame[] }
         unsubscribeAccount?: () => void;
         unsubscribeOrderBook?: () => void;
         unsubscribeTrade?: () => void;
@@ -137,7 +118,7 @@ export class TestnetBinanceFuturesService implements OnModuleInit, DataSource {
         private readonly configService: ConfigService,
 
     ) {
-        const securityConfig = this.configService.getConfig().provider.connectors?.find(q => q.connectorType == this.connectorType);
+        // const securityConfig = this.configService.getConfig().provider.connectors?.find(q => q.connectorType == this.connectorType);
 
         // console.log(`${this.constructor.name} constructor`);
         // console.log({ apiKey, apiSecret });
@@ -151,7 +132,7 @@ export class TestnetBinanceFuturesService implements OnModuleInit, DataSource {
         //     wsFutures: 'wss://stream.binancefuture.com/ws/'
         // });
 
-        this.api = null
+        // this.api = null
 
         // if (securityConfig?.key && securityConfig?.secret) {
         //     this.api = Binance({
@@ -406,55 +387,60 @@ export class TestnetBinanceFuturesService implements OnModuleInit, DataSource {
     }
 
     async openOrder(order: Order): Promise<Order> {
+
         if (!order.useSandbox) {
             switch (order.marketType) {
                 case MarketType.spot:
 
-                    let spotOrderToProvider: NewOrderSpot;
+                    let spotOrderToProvider: NewOrderSpot = {} as NewOrderSpot;
 
                     switch (order.type) {
 
                         case OrderType.MARKET:
-                            spotOrderToProvider = {
-                                type: BinanceOrderType.MARKET,
-                                symbol: order.symbol.name,
-                                side: order.side.toString(),
-                                quantity: order.quantity.toString(),
-                            } as NewOrderMarketBase
+                            if (order.symbol && order.quantity)
+                                spotOrderToProvider = {
+                                    type: BinanceOrderType.MARKET,
+                                    symbol: order.symbol.name,
+                                    side: order.side,
+                                    quantity: order.quantity.toString(),
+                                } as NewOrderMarketBase
                             break;
 
                         case OrderType.LIMIT:
-                            spotOrderToProvider = {
-                                type: BinanceOrderType.LIMIT,
-                                symbol: order.symbol.name,
-                                side: order.side.toString(),
-                                // 'GTC' - Good Till Cancelled | 'IOC' - Immediate or Cancel | 'FOK' - Fill or Kill
-                                timeInForce: 'GTC',
-                                quantity: order.quantity.toString(),
-                                price: order.price.toString(),
-                            } as NewOrderLimit
+                            if (order.symbol && order.quantity && order.price)
+                                spotOrderToProvider = {
+                                    type: BinanceOrderType.LIMIT,
+                                    symbol: order.symbol.name,
+                                    side: order.side,
+                                    // 'GTC' - Good Till Cancelled | 'IOC' - Immediate or Cancel | 'FOK' - Fill or Kill
+                                    timeInForce: 'GTC',
+                                    quantity: order.quantity.toString(),
+                                    price: order.price.toString(),
+                                } as NewOrderLimit
                             break;
 
                         case OrderType.TAKE_PROFIT:
-                            spotOrderToProvider = {
-                                type: BinanceOrderType.TAKE_PROFIT_LIMIT,
-                                symbol: order.symbol.name,
-                                side: order.side.toString(),
-                                quantity: order.quantity.toString(),
-                                price: order.price.toString(),
-                                // stopPrice: order.priceStop.toString(),
-                            } as NewOrderSL
+                            if (order.symbol && order.quantity && order.price)
+                                spotOrderToProvider = {
+                                    type: BinanceOrderType.TAKE_PROFIT_LIMIT,
+                                    symbol: order.symbol.name,
+                                    side: order.side,
+                                    quantity: order.quantity.toString(),
+                                    price: order.price.toString(),
+                                    // stopPrice: order.priceStop.toString(),
+                                } as NewOrderSL
                             break;
 
                         case OrderType.STOP:
-                            spotOrderToProvider = {
-                                type: BinanceOrderType.STOP_LOSS_LIMIT,
-                                symbol: order.symbol.name,
-                                side: order.side.toString(),
-                                quantity: order.quantity.toString(),
-                                price: order.price.toString(),
-                                // stopPrice: order.priceStop.toString(),
-                            } as NewOrderSL
+                            if (order.symbol && order.quantity && order.price)
+                                spotOrderToProvider = {
+                                    type: BinanceOrderType.STOP_LOSS_LIMIT,
+                                    symbol: order.symbol.name,
+                                    side: order.side,
+                                    quantity: order.quantity.toString(),
+                                    price: order.price.toString(),
+                                    // stopPrice: order.priceStop.toString(),
+                                } as NewOrderSL
                             break;
                     }
 
@@ -466,85 +452,89 @@ export class TestnetBinanceFuturesService implements OnModuleInit, DataSource {
                     break;
                 case MarketType.futures:
 
-                    let futuresOrderToProvider: NewFuturesOrder;
+                    let futuresOrderToProvider: NewFuturesOrder = {} as NewFuturesOrder;
 
                     switch (order.type) {
 
                         case OrderType.MARKET:
-                            futuresOrderToProvider = {
-                                type: order.type,
-                                symbol: order.symbol.name,
-                                side: order.side.toString(),
-                                quantity: order.quantity.toString(),
-                            } as MarketNewFuturesOrder
+                            if (order.symbol && order.quantity && order.price)
+                                futuresOrderToProvider = {
+                                    type: order.type,
+                                    symbol: order.symbol.name,
+                                    side: order.side,
+                                    quantity: order.quantity.toString(),
+                                } as MarketNewFuturesOrder
                             break;
 
                         case OrderType.LIMIT:
-                            futuresOrderToProvider = {
-                                type: order.type,
-                                symbol: order.symbol.name,
-                                side: order.side.toString(),
-                                // 'GTC' - Good Till Cancelled | 'IOC' - Immediate or Cancel | 'FOK' - Fill or Kill
-                                timeInForce: 'GTC',
-                                quantity: order.quantity.toString(),
-                                price: order.price.toString(),
-                            } as LimitNewFuturesOrder
+                            if (order.symbol && order.quantity && order.price)
+                                futuresOrderToProvider = {
+                                    type: order.type,
+                                    symbol: order.symbol.name,
+                                    side: order.side,
+                                    // 'GTC' - Good Till Cancelled | 'IOC' - Immediate or Cancel | 'FOK' - Fill or Kill
+                                    timeInForce: 'GTC',
+                                    quantity: order.quantity.toString(),
+                                    price: order.price.toString(),
+                                } as LimitNewFuturesOrder
                             break;
 
                         case OrderType.TAKE_PROFIT:
-                            futuresOrderToProvider = {
-                                type: order.type,
-                                symbol: order.symbol.name,
-                                side: order.side.toString(),
-                                quantity: order.quantity.toString(),
-                                //price: order.price.toString(),
-                                stopPrice: order.price.toString(),
-                            } as TakeProfitNewFuturesOrder
+                            if (order.symbol && order.quantity && order.price)
+                                futuresOrderToProvider = {
+                                    type: order.type,
+                                    symbol: order.symbol.name,
+                                    side: order.side,
+                                    quantity: order.quantity.toString(),
+                                    stopPrice: order.price.toString(),
+                                } as TakeProfitNewFuturesOrder
                             break;
 
                         case OrderType.STOP:
-                            futuresOrderToProvider = {
-                                type: order.type,
-                                symbol: order.symbol.name,
-                                side: order.side.toString(),
-                                quantity: order.quantity.toString(),
-                                //price: order.price.toString(),
-                                stopPrice: order.price.toString(),
-                            } as StopNewFuturesOrder
+                            if (order.symbol && order.quantity && order.price)
+                                futuresOrderToProvider = {
+                                    type: order.type,
+                                    symbol: order.symbol.name,
+                                    side: order.side,
+                                    quantity: order.quantity.toString(),
+                                    stopPrice: order.price.toString(),
+                                } as StopNewFuturesOrder
                             break;
 
                         case OrderType.TAKE_PROFIT_MARKET:
-                            futuresOrderToProvider = {
-                                type: order.type,
-                                symbol: order.symbol.name,
-                                side: order.side.toString(),
-                                quantity: order.quantity.toString(),
-                                stopPrice: order.price.toString(),
-                                workingType: "MARK_PRICE",
-                                priceProtect: "TRUE",
-                                priceMatch: "NONE",
-                                selfTradePreventionMode: "NONE",
-                                goodTillDate: 0,
-                                positionSide: "BOTH",
-                                closePosition: "true",
-                            } as TakeProfitMarketNewFuturesOrder
+                            if (order.symbol && order.quantity && order.price)
+                                futuresOrderToProvider = {
+                                    type: order.type,
+                                    symbol: order.symbol.name,
+                                    side: order.side,
+                                    quantity: order.quantity.toString(),
+                                    stopPrice: order.price.toString(),
+                                    workingType: "MARK_PRICE",
+                                    priceProtect: "TRUE",
+                                    priceMatch: "NONE",
+                                    selfTradePreventionMode: "NONE",
+                                    goodTillDate: 0,
+                                    positionSide: "BOTH",
+                                    closePosition: "true",
+                                } as TakeProfitMarketNewFuturesOrder
                             break;
 
                         case OrderType.STOP_MARKET:
-                            futuresOrderToProvider = {
-                                type: order.type,
-                                symbol: order.symbol.name,
-                                side: order.side.toString(),
-                                quantity: order.quantity.toString(),
-                                stopPrice: order.price.toString(),
-                                workingType: "MARK_PRICE",
-                                priceProtect: "TRUE",
-                                priceMatch: "NONE",
-                                selfTradePreventionMode: "NONE",
-                                goodTillDate: 0,
-                                positionSide: "BOTH",
-                                closePosition: "true",
-                            } as StopMarketNewFuturesOrder
+                            if (order.symbol && order.quantity && order.price)
+                                futuresOrderToProvider = {
+                                    type: order.type,
+                                    symbol: order.symbol.name,
+                                    side: order.side,
+                                    quantity: order.quantity.toString(),
+                                    stopPrice: order.price.toString(),
+                                    workingType: "MARK_PRICE",
+                                    priceProtect: "TRUE",
+                                    priceMatch: "NONE",
+                                    selfTradePreventionMode: "NONE",
+                                    goodTillDate: 0,
+                                    positionSide: "BOTH",
+                                    closePosition: "true",
+                                } as StopMarketNewFuturesOrder
                             break;
                     }
 
@@ -554,9 +544,9 @@ export class TestnetBinanceFuturesService implements OnModuleInit, DataSource {
 
                     let orders: Order[] = await this.getOpenOrders({ marketType: order.marketType })
 
-                    let futuresOrderEntity: FuturesOrder = null
+                    let futuresOrderEntity: FuturesOrder = {} as FuturesOrder
 
-                    if (!orders.find(q => q.symbol.name == futuresOrderToProvider.symbol && q.type == futuresOrderToProvider.type && q.side == futuresOrderToProvider.side))
+                    if (!orders.find(q => q.symbol && q.symbol.name == futuresOrderToProvider.symbol && q.type == futuresOrderToProvider.type && q.side == futuresOrderToProvider.side))
                         futuresOrderEntity = await this.api?.futuresOrder(futuresOrderToProvider)
 
                     if (futuresOrderEntity) {
@@ -582,6 +572,8 @@ export class TestnetBinanceFuturesService implements OnModuleInit, DataSource {
 
 
         const element = orders.find(q => q.orderId == id)
+
+        if (!element) throw new NotFoundException(`Order with id ${id} not found`)
 
         const order: Order = {
             symbol: { name: element.symbol },
@@ -727,7 +719,7 @@ export class TestnetBinanceFuturesService implements OnModuleInit, DataSource {
         await this.delay(2000);
     }
 
-    public async subscribe(marketType: MarketType, symbols: Symbol[], intervals: TimeFrame[]): Promise<void> {
+    public async subscribe(marketType: MarketType, symbols: Symbol[], intervals?: TimeFrame[]): Promise<void> {
 
         this.subscription.unsubscribeAccount = await this.subscribeToAccount({ marketType }, this.handlerForAccount);
         this.subscription.unsubscribeOrderBook = await this.subscribeToOrderBook({ marketType, symbols }, this.handlerForOrderbook);
@@ -739,7 +731,7 @@ export class TestnetBinanceFuturesService implements OnModuleInit, DataSource {
     }
 
 
-    public async updateSubscribeCollection(marketType: MarketType, symbols: Symbol[], intervals: TimeFrame[]): Promise<void> {
+    public async updateSubscribeCollection(marketType: MarketType, symbols: Symbol[], intervals?: TimeFrame[]): Promise<void> {
 
         this.subscription.options = { symbols, intervals }
         this.unsubscribe()
@@ -774,7 +766,7 @@ export class TestnetBinanceFuturesService implements OnModuleInit, DataSource {
     private handlerForAccount = async (marketType: MarketType, accountEvent: AccountEvent) => {
 
         const subscriptionType = SubscriptionType.PROVIDER_ACCOUNT_EVENT
-        const subscriptionValue: SubscriptionValue = { value: accountEvent, options: { connectorType: this.connectorType, marketType, key: null, updateMoment: Date.now() } }
+        const subscriptionValue: SubscriptionValue = { value: accountEvent, options: { connectorType: this.connectorType, marketType, updateMoment: Date.now() } }
 
         if (accountEvent.eventTime != this.lastAccountAdapterEventTime) {
 
@@ -798,13 +790,14 @@ export class TestnetBinanceFuturesService implements OnModuleInit, DataSource {
     ): Subscription {
         const matchedSubscription = this.configService
             .getConfig()
-            .provider
-            .connectors
-            .find(c =>
+            ?.provider
+            ?.connectors
+            ?.find(c =>
                 c.connectorType === connectorType &&
                 c.markets?.some(m => m.marketType === marketType)
             )
-            ?.subscriptions?.find(s => s.type === subscriptionType);
+            ?.subscriptions
+            ?.find(s => s.type === subscriptionType);
 
         if (!matchedSubscription) {
             throw new InternalServerErrorException(
@@ -816,6 +809,7 @@ export class TestnetBinanceFuturesService implements OnModuleInit, DataSource {
     }
 
 
+
     private handlerForOrderbook = async (marketType: MarketType, orderbook: OrderBook) => {
         const subscriptionType = SubscriptionType.PROVIDER_MARKETDATA_ORDERBOOK;
 
@@ -825,7 +819,7 @@ export class TestnetBinanceFuturesService implements OnModuleInit, DataSource {
 
         const subscriptionValue: SubscriptionValue = {
             value: orderbookSort,
-            options: { connectorType: this.connectorType, marketType, key: null, updateMoment: Date.now() },
+            options: { connectorType: this.connectorType, marketType, updateMoment: Date.now() },
         };
 
         const matchedSubscription = this.getMatchedSubscription(
@@ -857,7 +851,7 @@ export class TestnetBinanceFuturesService implements OnModuleInit, DataSource {
 
         const subscriptionValue: SubscriptionValue = {
             value: trade,
-            options: { connectorType: this.connectorType, marketType, key: null, updateMoment: Date.now() }
+            options: { connectorType: this.connectorType, marketType, updateMoment: Date.now() }
         };
 
         const subscription: Subscription = {
@@ -946,163 +940,6 @@ export class TestnetBinanceFuturesService implements OnModuleInit, DataSource {
             });
         };
     }
-
-
-    // public async placeOrder(order: Order, options: Connector): Promise<Order> {
-    //     const { side: side, quantity: lots, useSandbox } = order;
-    //     //const asset = await this.getAssetsInfo(options.connectorType, options.marketType);
-    //     const { marketTypes: marketType, currency } = options;
-    //     // const { id, symbol: ticker } = asset;
-    //     // order.retries = order.retries || 0;
-
-    //     if (useSandbox) {
-    //         return placeSandboxOrder(order, options);
-    //     }
-
-    //     // const base: NewOrderMarketBase = {
-    //     //     quantity: String(lots),
-    //     //     side: OrderSideBinance.BUY ? OrderSideBinance.BUY : OrderSideBinance.SELL,
-    //     //     symbol: ticker,
-    //     //     type: BinanceOrderType.MARKET,
-    //     // };
-
-    //     let res: Order | FuturesOrder;
-    //     // Only network condition should be try catch wrapped and retried, for prevent network retries when error throws from JS error
-
-    //     try {
-    //         switch (marketType) {
-    //             case 'futures':
-    //                 let positionSide = PositionSide.BOTH;
-
-    //                 if (this.hedgeMode) {
-    //                     positionSide = OrderSideBinance.BUY ? PositionSide.LONG : PositionSide.SHORT;
-
-    //                     // if (order.close) {
-    //                     //     positionSide = OrderSideBinance.BUY ? PositionSide.SHORT : PositionSide.LONG;
-    //                     // }
-    //                 }
-
-    //                 // const futuresPayload: NewFuturesOrder = {
-    //                 //     ...base,
-    //                 //     positionSide,
-    //                 //     newOrderRespType: NewOrderRespType.RESULT,
-    //                 // };
-
-    //                 // res = await this.api?.futuresOrder(futuresPayload);
-    //                 break;
-    //             case 'margin':
-    //                 // const marginPayload: NewOrderMargin = {
-    //                 //     ...base,
-    //                 //     sideEffectType: order.close ? SideEffectType.AUTO_REPAY : SideEffectType.MARGIN_BUY,
-    //                 // };
-
-    //                 // res = await this.api?.marginOrder(marginPayload);
-    //                 break;
-    //             default:
-    //                 // res = await this.api?.order(base);
-    //                 break;
-    //         }
-
-    //         // if (this.badStatus.includes(res.status)) {
-    //         //     throw res;
-    //         // }
-    //     } catch (e) {
-    //         // if (order.retries <= 10 && this.canRetry(e)) {
-    //         //     debug.logDebug('error order place', e);
-    //         //     order.retries++;
-    //         //     // 10 ретраев чтобы точно попасть в период блокировки биржи изза скачков цены на 30 минут
-    //         //     // тк блокировка длится в среднем 30 минут
-    //         //     const timeout = Math.floor(
-    //         //         math.clamp(Math.pow(3 + Math.random(), order.retries) * 1000, 3000, 300000) + 60000 * Math.random(),
-    //         //     );
-    //         //     await promise.sleep(timeout);
-
-    //         //     // Проверяем, что подписка все еще актуальна
-    //         //     if (this.assets.has(asset.id)) {
-    //         //         return this.placeOrder(order, options);
-    //         //     }
-    //         // }
-
-    //         debug.logDebug('retry failure with order', order);
-
-    //         throw new Error(ErrorEnvironment.Provider, e.message);
-    //     }
-
-    //     // if (order.retries > 0) {
-    //     //     debug.logDebug('retry success');
-    //     // }
-
-    //     const precision = math.getPrecision(order.price);
-    //     // avg trade price
-    //     let fees = 0;
-    //     let price = 0;
-    //     let qty = 0;
-
-    //     // if ('fills' in res) {
-    //     //     res.fills.forEach((fill) => {
-    //     //         price += Number(fill.price);
-    //     //         qty += Number(fill.qty);
-
-    //     //         // if (ticker.startsWith(fill.commissionAsset)) {
-    //     //         //     fees += Number(fill.commission);
-    //     //         // }
-    //     //     });
-
-    //     //     price = math.toFixed(price / res.fills.length, precision);
-    //     // }
-
-    //     if ('avgPrice' in res) {
-    //         price = math.toFixed(Number(res.avgPrice), precision);
-    //     }
-
-    //     let executedLots: number;
-
-    //     if (qty) {
-    //         const realQty = qty - fees;
-    //         // executedLots = this.prepareLots(realQty, id);
-    //     } else if ('executedQty' in res) {
-    //         executedLots = Number(res.executedQty);
-    //     }
-
-    //     //const feeAmount = fees && isFinite(fees) ? fees : price * order.origQty * (options.fee / 100);
-    //     //const commission = { value: feeAmount, currency };
-    //     const executed: Order = {
-    //         ...order,
-    //         quantity: executedLots,
-    //         price,
-    //     };
-
-    //     return executed;
-    // }
-
-    // // public prepareLots(lots: number, assetId: string) {
-    // //     const asset = this.assets.get(assetId);
-
-    // //     if (!asset) {
-    // //         throw new Error(ErrorEnvironment.Provider, `Unknown instument id ${assetId}`);
-    // //     }
-
-    // //     const resultLots = 0;
-
-    // //     //const isInteger = asset.lotPrecision === 0;
-    // //     // let resultLots = isInteger ? Math.round(lots) : math.toFixed(lots, asset.lotPrecision);
-    // //     // const lotsRedunantValue = isInteger ? 1 : orders.getMinIncrementValue(asset.minQuantity);
-
-    // //     // if (Math.abs(resultLots - lots) > lotsRedunantValue) {
-    // //     //     const rev = resultLots < lots ? 1 : -1;
-
-    // //     //     // Issue with rounding
-    // //     //     // Reduce lots when rounding is more than source amount and incrase when it less than non rounded lots
-    // //     //     while (Math.abs(resultLots - lots) >= lotsRedunantValue) {
-    // //     //         resultLots = math.toFixed(resultLots + lotsRedunantValue * rev, asset.lotPrecision);
-    // //     //     }
-    // //     // }
-
-    // //     return resultLots;
-    // // }
-
-
-    // // candleMsgs: Array<{ symbol: Symbol, interval: string, firstTradeId: number, lastTradeId: number, count?: number }> = []
 
 
     private candleAdapter(handler: CandleHandler, interval: TimeFrame) {

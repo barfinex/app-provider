@@ -1,0 +1,42 @@
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "../../dist/apps/provider.tsbuildinfo"
+  },
+  "include": [
+    "src"
+  ],
+  "references": [
+    {
+      "path": "../../libs/types"
+    },
+    {
+      "path": "../../libs/utils"
+    },
+    {
+      "path": "../../libs/key"
+    },
+    {
+      "path": "../../libs/plugin-driver"
+    },
+    {
+      "path": "../../libs/connectors"
+    },
+    {
+      "path": "../../libs/orders"
+    },
+    {
+      "path": "../../libs/config"
+    },
+    {
+      "path": "../../libs/detector"
+    },
+    {
+      "path": "../../libs/provider-ws-bridge"
+    },
+    {
+      "path": "../../libs/telegram"
+    }
+  ]
+}

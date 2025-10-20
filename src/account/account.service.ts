@@ -90,28 +90,24 @@ export class AccountService {
 
 
     async getAll(): Promise<Account[]> {
+        const accounts: Account[] = [];
 
-        const accounts = [];
+        // Берём строго значения enum, а не ключи
+        const connectorTypes = Object.values(ConnectorType);
+        const marketTypes = Object.values(MarketType);
 
-        const connectorTypes = Object.keys(ConnectorType);
-        const marketTypes = Object.keys(MarketType);
+        for (const connectorType of connectorTypes) {
+            for (const marketType of marketTypes) {
+                const account = await this.getAccountInfo(connectorType, marketType);
 
-        for (let i = 0; i < connectorTypes.length; i++) {
-            const connectorType = ConnectorType[connectorTypes[i]];
-
-            for (let j = 0; j < marketTypes.length; j++) {
-                const marketType = MarketType[marketTypes[j]];
-
-                const account = await this.getAccountInfo(connectorType, marketType)
-
-                // if (account.marketType != MarketType.margin) console.log('account:', account);
-
-                if (account && account.isActive) accounts.push(account);
+                // если аккаунт активен — добавляем
+                if (account?.isActive) {
+                    accounts.push(account);
+                }
             }
         }
 
-        ConnectorService.setAccounts(accounts)
-
+        ConnectorService.setAccounts(accounts);
         return accounts;
     }
 

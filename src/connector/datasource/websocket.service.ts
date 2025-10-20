@@ -156,10 +156,10 @@ export class WebSocketService {
     /**
      * Вызов с активным WebSocket (если он открыт)
      */
-    public withSocket(wsUrl: string, fn: (ws: WebSocket) => void): void {
+    public withSocket(wsUrl: string, fn: (socketInfo: SocketInfo) => void): void {
         const socketInfo = this.sockets.get(wsUrl);
         if (socketInfo && socketInfo.ws.readyState === WebSocket.OPEN) {
-            fn(socketInfo.ws);
+            fn(socketInfo); // передаём весь объект
         } else {
             this.logger.warn(`Socket not open for ${wsUrl}`);
         }

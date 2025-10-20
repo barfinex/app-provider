@@ -1,4 +1,4 @@
-import { forwardRef, Inject, Injectable, InternalServerErrorException, Logger, OnModuleInit } from "@nestjs/common";
+import { forwardRef, Inject, Injectable, InternalServerErrorException, Logger, NotFoundException, OnModuleInit } from "@nestjs/common";
 import { AppError, ErrorEnvironment } from '../../error';
 import Binance, {
     BidDepth as BinanceBidDepth,
@@ -62,7 +62,7 @@ import {
     SymbolPrice,
     AccountDailyProfitDetail,
     SubscriptionValue,
-    CandleRaw,
+    CandleRaw
 } from '@barfinex/types';
 import moment from 'moment';
 import { ConnectorService } from "../connector.service";
@@ -71,10 +71,9 @@ import { WebSocketService } from './websocket.service';
 import { InjectRepository } from "@nestjs/typeorm";
 import { SymbolEntity } from "../../symbol/symbol.entity";
 import { Repository } from "typeorm";
-import { ConfigService } from "@barfinex/config/config.service";
+import { ConfigService } from "@barfinex/config";
 import { CandleService } from '../../candle/candle.service';
 import { CandleEntity } from "../../candle/candle.entity";
-import { Console } from "console";
 import { candleMapper } from "@barfinex/utils/src";
 
 @Injectable()
@@ -90,7 +89,7 @@ export class BinanceService implements OnModuleInit, DataSource {
 
 
     private subscription: {
-        options?: { symbols: Symbol[], intervals: TimeFrame[] }
+        options?: { symbols: Symbol[], intervals?: TimeFrame[] }
         unsubscribeAccount?: () => void;
         unsubscribeOrderBook?: () => void;
         unsubscribeTrade?: () => void;
@@ -113,7 +112,7 @@ export class BinanceService implements OnModuleInit, DataSource {
 
     private readonly client: ClientProxy;
 
-    protected providerKey: string = null
+    protected providerKey: string | null = null
 
     constructor(
         private readonly configService: ConfigService,
@@ -128,7 +127,7 @@ export class BinanceService implements OnModuleInit, DataSource {
     ) {
 
         const tcpHost = process.env.REDIS_HOST || 'localhost';
-        const tcpPort = parseInt(process.env.REDIS_PORT, 10) || 6379;
+        const tcpPort = parseInt(process.env.REDIS_PORT ?? "6379", 10);
 
         if (isNaN(tcpPort) || tcpPort < 0 || tcpPort > 65535) this.logger.error(`Invalid TCP port: ${tcpPort}`);
 
@@ -143,9 +142,16 @@ export class BinanceService implements OnModuleInit, DataSource {
         } as RedisOptions);
 
 
-        this.providerKey = this.configService.getConfig().provider.key
+        const providerKey = this.configService.getConfig().provider?.key;
+        if (!providerKey) {
+            throw new InternalServerErrorException('Provider key not found in configuration');
+        }
+        this.providerKey = providerKey;
 
-        const securityConfig = this.configService.getConfig().provider.connectors.find(q => q.connectorType == this.connectorType);
+        const securityConfig = this.configService
+            .getConfig()
+            ?.provider
+            ?.connectors?.find(q => q.connectorType === this.connectorType);
 
 
 
@@ -184,7 +190,7 @@ export class BinanceService implements OnModuleInit, DataSource {
         try {
             await this.client.connect();
             this.logger.log('Connected to Redis successfully!');
-        } catch (error) {
+        } catch (error: any) {
             this.logger.error('Failed to connect to Redis:', error?.message || error);
         }
 
@@ -201,7 +207,7 @@ export class BinanceService implements OnModuleInit, DataSource {
                 .catch(err => {
                     this.logger.error("Error fetching Binance time:", err?.message || err);
                 });
-        } catch (err) {
+        } catch (err: any) {
             this.logger.error("Unhandled error in onModuleInit:", err?.message || err);
         }
     }
@@ -383,7 +389,18 @@ export class BinanceService implements OnModuleInit, DataSource {
 
                 } else if (marketType === MarketType.margin) {
 
-                    const securityConfig = this.configService.getConfig().provider.connectors.find(q => q.connectorType == this.connectorType);
+                    const config = this.configService.getConfig();
+                    const connectors = config.provider?.connectors ?? [];
+
+                    const securityConfig = connectors.find(
+                        q => q.connectorType === this.connectorType
+                    );
+
+                    if (!securityConfig) {
+                        throw new InternalServerErrorException(
+                            `Connector config not found for type: ${this.connectorType}`
+                        );
+                    }
 
                     const restApiUrl = 'https://api.binance.com/sapi/v1/margin/allPairs';
                     const response = await axios.get(restApiUrl, {
@@ -403,7 +420,7 @@ export class BinanceService implements OnModuleInit, DataSource {
                         });
                     });
                 }
-            } catch (error) {
+            } catch (error: any) {
                 this.logger.error(
                     `Error fetching symbols from Binance for connectorType: ${connectorType}, marketType: ${marketType}`,
                     error.stack,
@@ -528,22 +545,27 @@ export class BinanceService implements OnModuleInit, DataSource {
                             default: type = OrderType.MARKET; break
                         }
 
+                        const provider = this.configService.getConfig().provider;
+                        if (!provider) {
+                            throw new InternalServerErrorException('Missing provider configuration');
+                        }
+
                         return account.orders.push({
                             symbol: { name: order.symbol },
-                            side: side,
-                            type: type,
+                            side,
+                            type,
                             quantity: Number(order.origQty),
                             updateTime: order.updateTime,
                             time: order.time,
                             price: Number(order.price),
                             useSandbox: false,
                             connectorType: this.connectorType,
-                            marketType: marketType,
+                            marketType,
                             source: {
                                 type: OrderSourceType.provider,
                                 key: this.connectorType,
-                                restApiUrl: this.configService.getConfig().provider.restApiUrl
-                            }
+                                restApiUrl: provider.restApiUrl,
+                            },
                         });
                     });
 
@@ -606,58 +628,59 @@ export class BinanceService implements OnModuleInit, DataSource {
      */
     async openOrder(order: Order): Promise<Order> {
 
-
         if (!order.useSandbox) {
-
-
             switch (order.marketType) {
                 case MarketType.spot:
 
-                    let spotOrderToProvider: NewOrderSpot;
+                    let spotOrderToProvider: NewOrderSpot = {} as NewOrderSpot;
 
                     switch (order.type) {
 
                         case OrderType.MARKET:
-                            spotOrderToProvider = {
-                                type: BinanceOrderType.MARKET,
-                                symbol: order.symbol.name,
-                                side: order.side.toString(),
-                                quantity: order.quantity.toString(),
-                            } as NewOrderMarketBase
+                            if (order.symbol && order.quantity)
+                                spotOrderToProvider = {
+                                    type: BinanceOrderType.MARKET,
+                                    symbol: order.symbol.name,
+                                    side: order.side,
+                                    quantity: order.quantity.toString(),
+                                } as NewOrderMarketBase
                             break;
 
                         case OrderType.LIMIT:
-                            spotOrderToProvider = {
-                                type: BinanceOrderType.LIMIT,
-                                symbol: order.symbol.name,
-                                side: order.side.toString(),
-                                // 'GTC' - Good Till Cancelled | 'IOC' - Immediate or Cancel | 'FOK' - Fill or Kill
-                                timeInForce: 'GTC',
-                                quantity: order.quantity.toString(),
-                                price: order.price.toString(),
-                            } as NewOrderLimit
+                            if (order.symbol && order.quantity && order.price)
+                                spotOrderToProvider = {
+                                    type: BinanceOrderType.LIMIT,
+                                    symbol: order.symbol.name,
+                                    side: order.side,
+                                    // 'GTC' - Good Till Cancelled | 'IOC' - Immediate or Cancel | 'FOK' - Fill or Kill
+                                    timeInForce: 'GTC',
+                                    quantity: order.quantity.toString(),
+                                    price: order.price.toString(),
+                                } as NewOrderLimit
                             break;
 
                         case OrderType.TAKE_PROFIT:
-                            spotOrderToProvider = {
-                                type: BinanceOrderType.TAKE_PROFIT_LIMIT,
-                                symbol: order.symbol.name,
-                                side: order.side.toString(),
-                                quantity: order.quantity.toString(),
-                                price: order.price.toString(),
-                                // stopPrice: order.priceStop.toString(),
-                            } as NewOrderSL
+                            if (order.symbol && order.quantity && order.price)
+                                spotOrderToProvider = {
+                                    type: BinanceOrderType.TAKE_PROFIT_LIMIT,
+                                    symbol: order.symbol.name,
+                                    side: order.side,
+                                    quantity: order.quantity.toString(),
+                                    price: order.price.toString(),
+                                    // stopPrice: order.priceStop.toString(),
+                                } as NewOrderSL
                             break;
 
                         case OrderType.STOP:
-                            spotOrderToProvider = {
-                                type: BinanceOrderType.STOP_LOSS_LIMIT,
-                                symbol: order.symbol.name,
-                                side: order.side.toString(),
-                                quantity: order.quantity.toString(),
-                                price: order.price.toString(),
-                                // stopPrice: order.priceStop.toString(),
-                            } as NewOrderSL
+                            if (order.symbol && order.quantity && order.price)
+                                spotOrderToProvider = {
+                                    type: BinanceOrderType.STOP_LOSS_LIMIT,
+                                    symbol: order.symbol.name,
+                                    side: order.side,
+                                    quantity: order.quantity.toString(),
+                                    price: order.price.toString(),
+                                    // stopPrice: order.priceStop.toString(),
+                                } as NewOrderSL
                             break;
                     }
 
@@ -669,93 +692,99 @@ export class BinanceService implements OnModuleInit, DataSource {
                     break;
                 case MarketType.futures:
 
-                    let futuresOrderToProvider: NewFuturesOrder;
+                    let futuresOrderToProvider: NewFuturesOrder = {} as NewFuturesOrder;
 
                     switch (order.type) {
 
                         case OrderType.MARKET:
-                            futuresOrderToProvider = {
-                                type: order.type,
-                                symbol: order.symbol.name,
-                                side: order.side.toString(),
-                                quantity: order.quantity.toString(),
-                            } as MarketNewFuturesOrder
+                            if (order.symbol && order.quantity && order.price)
+                                futuresOrderToProvider = {
+                                    type: order.type,
+                                    symbol: order.symbol.name,
+                                    side: order.side,
+                                    quantity: order.quantity.toString(),
+                                } as MarketNewFuturesOrder
                             break;
 
                         case OrderType.LIMIT:
-                            futuresOrderToProvider = {
-                                type: order.type,
-                                symbol: order.symbol.name,
-                                side: order.side.toString(),
-                                // 'GTC' - Good Till Cancelled | 'IOC' - Immediate or Cancel | 'FOK' - Fill or Kill
-                                timeInForce: 'GTC',
-                                quantity: order.quantity.toString(),
-                                price: order.price.toString(),
-                            } as LimitNewFuturesOrder
+                            if (order.symbol && order.quantity && order.price)
+                                futuresOrderToProvider = {
+                                    type: order.type,
+                                    symbol: order.symbol.name,
+                                    side: order.side,
+                                    // 'GTC' - Good Till Cancelled | 'IOC' - Immediate or Cancel | 'FOK' - Fill or Kill
+                                    timeInForce: 'GTC',
+                                    quantity: order.quantity.toString(),
+                                    price: order.price.toString(),
+                                } as LimitNewFuturesOrder
                             break;
 
                         case OrderType.TAKE_PROFIT:
-                            futuresOrderToProvider = {
-                                type: order.type,
-                                symbol: order.symbol.name,
-                                side: order.side.toString(),
-                                quantity: order.quantity.toString(),
-                                //price: order.price.toString(),
-                                stopPrice: order.price.toString(),
-                            } as TakeProfitNewFuturesOrder
+                            if (order.symbol && order.quantity && order.price)
+                                futuresOrderToProvider = {
+                                    type: order.type,
+                                    symbol: order.symbol.name,
+                                    side: order.side,
+                                    quantity: order.quantity.toString(),
+                                    //price: order.price.toString(),
+                                    stopPrice: order.price.toString(),
+                                } as TakeProfitNewFuturesOrder
                             break;
 
                         case OrderType.STOP:
-                            futuresOrderToProvider = {
-                                type: order.type,
-                                symbol: order.symbol.name,
-                                side: order.side.toString(),
-                                quantity: order.quantity.toString(),
-                                //price: order.price.toString(),
-                                stopPrice: order.price.toString(),
-                            } as StopNewFuturesOrder
+                            if (order.symbol && order.quantity && order.price)
+                                futuresOrderToProvider = {
+                                    type: order.type,
+                                    symbol: order.symbol.name,
+                                    side: order.side,
+                                    quantity: order.quantity.toString(),
+                                    //price: order.price.toString(),
+                                    stopPrice: order.price.toString(),
+                                } as StopNewFuturesOrder
                             break;
 
                         case OrderType.TAKE_PROFIT_MARKET:
-                            futuresOrderToProvider = {
-                                type: order.type,
-                                symbol: order.symbol.name,
-                                side: order.side.toString(),
-                                quantity: order.quantity.toString(),
-                                stopPrice: order.price.toString(),
-                                workingType: "MARK_PRICE",
-                                priceProtect: "TRUE",
-                                priceMatch: "NONE",
-                                selfTradePreventionMode: "NONE",
-                                goodTillDate: 0,
-                                positionSide: "BOTH",
-                                closePosition: "true",
-                            } as TakeProfitMarketNewFuturesOrder
+                            if (order.symbol && order.quantity && order.price)
+                                futuresOrderToProvider = {
+                                    type: order.type,
+                                    symbol: order.symbol.name,
+                                    side: order.side,
+                                    quantity: order.quantity.toString(),
+                                    stopPrice: order.price.toString(),
+                                    workingType: "MARK_PRICE",
+                                    priceProtect: "TRUE",
+                                    priceMatch: "NONE",
+                                    selfTradePreventionMode: "NONE",
+                                    goodTillDate: 0,
+                                    positionSide: "BOTH",
+                                    closePosition: "true",
+                                } as TakeProfitMarketNewFuturesOrder
                             break;
 
                         case OrderType.STOP_MARKET:
-                            futuresOrderToProvider = {
-                                type: order.type,
-                                symbol: order.symbol.name,
-                                side: order.side.toString(),
-                                quantity: order.quantity.toString(),
-                                stopPrice: order.price.toString(),
-                                workingType: "MARK_PRICE",
-                                priceProtect: "TRUE",
-                                priceMatch: "NONE",
-                                selfTradePreventionMode: "NONE",
-                                goodTillDate: 0,
-                                positionSide: "BOTH",
-                                closePosition: "true",
-                            } as StopMarketNewFuturesOrder
+                            if (order.symbol && order.quantity && order.price)
+                                futuresOrderToProvider = {
+                                    type: order.type,
+                                    symbol: order.symbol.name,
+                                    side: order.side,
+                                    quantity: order.quantity.toString(),
+                                    stopPrice: order.price.toString(),
+                                    workingType: "MARK_PRICE",
+                                    priceProtect: "TRUE",
+                                    priceMatch: "NONE",
+                                    selfTradePreventionMode: "NONE",
+                                    goodTillDate: 0,
+                                    positionSide: "BOTH",
+                                    closePosition: "true",
+                                } as StopMarketNewFuturesOrder
                             break;
                     }
 
                     let orders: Order[] = await this.getOpenOrders({ marketType: order.marketType })
 
-                    let futuresOrderEntity: FuturesOrder = null
+                    let futuresOrderEntity: FuturesOrder = {} as FuturesOrder
 
-                    if (!orders.find(q => q.symbol.name == futuresOrderToProvider.symbol && q.type == futuresOrderToProvider.type && q.side == futuresOrderToProvider.side)) {
+                    if (!orders.find(q => q.symbol && q.symbol.name == futuresOrderToProvider.symbol && q.type == futuresOrderToProvider.type && q.side == futuresOrderToProvider.side)) {
                         futuresOrderEntity = await this.api?.futuresOrder(futuresOrderToProvider)
                     }
 
@@ -784,6 +813,14 @@ export class BinanceService implements OnModuleInit, DataSource {
         const orders = await this.api?.futuresOpenOrders({ symbol: symbol.name });
         const element = orders.find(q => q.orderId == id)
 
+        if (!element) throw new NotFoundException(`Order with id ${id} not found`)
+
+        const provider = this.configService.getConfig().provider;
+
+        if (!provider) {
+            throw new InternalServerErrorException('Provider config is missing');
+        }
+
         const order: Order = {
             symbol: { name: element.symbol },
             externalId: element.orderId.toString(),
@@ -796,12 +833,12 @@ export class BinanceService implements OnModuleInit, DataSource {
             source: {
                 type: OrderSourceType.provider,
                 key: this.connectorType,
-                restApiUrl: this.configService.getConfig().provider.restApiUrl
+                restApiUrl: provider.restApiUrl,
             },
             useSandbox: false,
             marketType,
-            connectorType: this.connectorType
-        }
+            connectorType: this.connectorType,
+        };
 
         if (element) await this.api?.futuresCancelOrder({ orderId: +id, symbol: symbol.name })
 
@@ -844,6 +881,13 @@ export class BinanceService implements OnModuleInit, DataSource {
             for (let i = 0; i < ordersInProvider_Spot.length; i++) {
                 const element = ordersInProvider_Spot[i];
 
+                const config = this.configService.getConfig();
+                const provider = config.provider;
+
+                if (!provider) {
+                    throw new InternalServerErrorException('Provider config is missing');
+                }
+
                 let order: Order = {
                     symbol: { name: element.symbol },
                     externalId: element.orderId.toString(),
@@ -856,12 +900,13 @@ export class BinanceService implements OnModuleInit, DataSource {
                     source: {
                         type: OrderSourceType.provider,
                         key: this.connectorType,
-                        restApiUrl: this.configService.getConfig().provider.restApiUrl
+                        restApiUrl: provider.restApiUrl,
                     },
                     useSandbox: false,
                     marketType,
-                    connectorType: this.connectorType
-                }
+                    connectorType: this.connectorType,
+                };
+
 
                 result.push(order);
             }
@@ -878,24 +923,32 @@ export class BinanceService implements OnModuleInit, DataSource {
                 if (type == OrderType.STOP_MARKET || type == OrderType.TAKE_PROFIT_MARKET)
                     price = parseFloat(order.stopPrice)
 
+                const config = this.configService.getConfig();
+                const provider = config.provider;
+
+                if (!provider) {
+                    throw new InternalServerErrorException('Provider config is missing');
+                }
+
                 result.push({
                     symbol: { name: order.symbol },
                     externalId: order.orderId,
                     side: order.side.toString() as OrderSide,
-                    type: type,
-                    price: price,
+                    type,
+                    price,
                     quantity: parseFloat(order.origQty),
                     time: order.time,
                     updateTime: order.updateTime,
                     useSandbox: false,
                     connectorType: this.connectorType,
-                    marketType: marketType,
+                    marketType,
                     source: {
                         type: OrderSourceType.provider,
                         key: this.connectorType,
-                        restApiUrl: this.configService.getConfig().provider.restApiUrl
-                    }
+                        restApiUrl: provider.restApiUrl,
+                    },
                 });
+
             });
         }
 
@@ -924,15 +977,19 @@ export class BinanceService implements OnModuleInit, DataSource {
      * @param intervals - Array of time frames for the subscription.
      * @returns A Promise that resolves when the subscription is active.
      */
-    public async subscribe(marketType: MarketType, symbols: Symbol[], intervals: TimeFrame[]): Promise<void> {
-        const connector = this.configService
-            .getConfig()
-            .provider
-            .connectors
-            .find(c =>
+    public async subscribe(marketType: MarketType, symbols: Symbol[], intervals?: TimeFrame[]): Promise<void> {
+
+        const config = this.configService.getConfig();
+
+        if (!config.provider?.connectors) {
+            throw new InternalServerErrorException('Provider connectors not configured');
+        }
+
+        const connector = config.provider.connectors.find(
+            c =>
                 c.connectorType === this.connectorType &&
                 c.markets?.some(m => m.marketType === marketType)
-            );
+        );
 
         if (!connector) {
             throw new InternalServerErrorException(`Connector ${this.connectorType}-${marketType} not found in config`);
@@ -1092,7 +1149,7 @@ export class BinanceService implements OnModuleInit, DataSource {
                 this.logger.log(
                     `Fetched ${symbols.length} symbols for ${marketType} market (before hash-check).`
                 );
-            } catch (error) {
+            } catch (error: any) {
                 this.logger.error(
                     `Failed to fetch symbols for ${marketType} market: ${error.message}`
                 );
@@ -1220,13 +1277,14 @@ export class BinanceService implements OnModuleInit, DataSource {
         return () => {
 
             if (marketType === MarketType.futures) {
-                this.webSocketService.withSocket(wsUrl, (ws) => {
+                this.webSocketService.withSocket(wsUrl, (si) => {
                     const payload = {
                         method: 'UNSUBSCRIBE',
                         params: symbols.map((s) => `${s.toLowerCase()}@ticker`),
                         id: Date.now(),
                     };
-                    ws.send(JSON.stringify(payload));
+
+                    si.ws.send(JSON.stringify(payload)); // ✅ правильно
                     this.logger.log(
                         `Sent UNSUBSCRIBE for ${symbols.length} futures symbols.`,
                     );
@@ -1248,11 +1306,13 @@ export class BinanceService implements OnModuleInit, DataSource {
      * @param intervals - Array of time frames to update in the subscription.
      * @returns A Promise that resolves when the subscription collection is updated.
      */
-    public async updateSubscribeCollection(marketType: MarketType, symbols: Symbol[], intervals: TimeFrame[]): Promise<void> {
+    public async updateSubscribeCollection(marketType: MarketType, symbols: Symbol[], intervals?: TimeFrame[]): Promise<void> {
+
 
         this.subscription.options = { symbols, intervals }
         this.unsubscribe()
         this.subscribe(marketType, symbols, intervals)
+
     }
 
 
@@ -1270,20 +1330,38 @@ export class BinanceService implements OnModuleInit, DataSource {
                 updateMoment: parseFloat(moment().format('x')),
                 active: true
             }
+
             const subscriptionValue: SubscriptionValue = {
                 value: accountEvent,
-                options: { connectorType: this.connectorType, marketType, key: this.providerKey, updateMoment: subscription.updateMoment }
-            }
+                options: {
+                    connectorType: this.connectorType,
+                    marketType,
+                    key: this.providerKey ?? undefined,
+                    updateMoment: subscription.updateMoment ?? Date.now(),
+                },
+            };
 
             ConnectorService.addSubscription({ connectorType: this.connectorType, marketType, subscription })
 
             this.isEmitToRedisEnabled && this.client.emit(subscriptionType, subscriptionValue)
 
             if (accountEvent?.options?.symbol) {
-                const { symbol } = accountEvent?.options
-                if (symbol && !this.subscription.options.symbols.find(q => q == symbol)) {
-                    this.subscription.options.symbols.push(symbol)
-                    this.updateSubscribeCollection(marketType, this.subscription.options.symbols, this.subscription.options.intervals)
+                const { symbol } = accountEvent.options;
+
+                // гарантируем, что subscription.options существует
+                if (!this.subscription.options) {
+                    this.subscription.options = { symbols: [], intervals: [] };
+                }
+
+                const symbols = this.subscription.options.symbols;
+
+                if (symbol && !symbols.includes(symbol)) {
+                    symbols.push(symbol);
+                    this.updateSubscribeCollection(
+                        marketType,
+                        symbols,
+                        this.subscription.options.intervals
+                    );
                 }
             }
         }
@@ -1313,7 +1391,12 @@ export class BinanceService implements OnModuleInit, DataSource {
 
         const subscriptionValue: SubscriptionValue = {
             value: orderbookSort,
-            options: { connectorType: this.connectorType, marketType, key: this.providerKey, updateMoment: subscription.updateMoment },
+            options: {
+                connectorType: this.connectorType,
+                marketType,
+                key: this.providerKey ?? undefined,          // ✅ null → undefined
+                updateMoment: subscription.updateMoment ?? Date.now(), // ✅ undefined → текущее время
+            },
         };
 
         ConnectorService.addSubscription({
@@ -1375,8 +1458,8 @@ export class BinanceService implements OnModuleInit, DataSource {
             options: {
                 connectorType: this.connectorType,
                 marketType,
-                key: this.providerKey,
-                updateMoment: subscription.updateMoment,
+                key: this.providerKey ?? undefined,             // ✅ null → undefined
+                updateMoment: subscription.updateMoment ?? Date.now(), // ✅ undefined → текущее время
             },
         };
 
@@ -1446,7 +1529,12 @@ export class BinanceService implements OnModuleInit, DataSource {
 
         const subscriptionValue: SubscriptionValue = {
             value: normalized,
-            options: { connectorType: this.connectorType, marketType, key: this.providerKey, updateMoment: subscription.updateMoment },
+            options: {
+                connectorType: this.connectorType,
+                marketType,
+                key: this.providerKey ?? undefined,
+                updateMoment: subscription.updateMoment ?? Date.now(),
+            },
         };
 
         // console.log("📊 handlerForSymbolPrices", {
@@ -1473,15 +1561,21 @@ export class BinanceService implements OnModuleInit, DataSource {
         marketType: MarketType,
         subscriptionType: SubscriptionType
     ): Subscription {
-        const matchedSubscription = this.configService
-            .getConfig()
-            .provider
-            .connectors
-            .find(c =>
+        const config = this.configService.getConfig();
+
+        if (!config.provider?.connectors) {
+            throw new InternalServerErrorException('Provider connectors not configured');
+        }
+
+        const connector = config.provider.connectors.find(
+            c =>
                 c.connectorType === connectorType &&
                 c.markets?.some(m => m.marketType === marketType)
-            )
-            ?.subscriptions?.find(s => s.type === subscriptionType);
+        );
+
+        const matchedSubscription = connector?.subscriptions?.find(
+            s => s.type === subscriptionType
+        );
 
         if (!matchedSubscription) {
             throw new InternalServerErrorException(
@@ -1491,6 +1585,7 @@ export class BinanceService implements OnModuleInit, DataSource {
 
         return matchedSubscription;
     }
+
 
 
     private handlerForTrade = async (marketType: MarketType, trade: Trade) => {
@@ -1505,10 +1600,17 @@ export class BinanceService implements OnModuleInit, DataSource {
             active: true
         };
 
+
         const subscriptionValue: SubscriptionValue = {
             value: trade,
-            options: { connectorType: this.connectorType, marketType, key: this.providerKey, updateMoment: subscription.updateMoment }
+            options: {
+                connectorType: this.connectorType,
+                marketType,
+                key: this.providerKey ?? undefined,
+                updateMoment: subscription.updateMoment ?? Date.now(),
+            },
         };
+
 
         ConnectorService.addSubscription({
             connectorType: this.connectorType,
@@ -1547,8 +1649,14 @@ export class BinanceService implements OnModuleInit, DataSource {
 
             const subscriptionValue: SubscriptionValue = {
                 value: normalized,
-                options: { connectorType: this.connectorType, marketType, key: this.providerKey, updateMoment: subscription.updateMoment },
+                options: {
+                    connectorType: this.connectorType,
+                    marketType,
+                    key: this.providerKey ?? undefined,
+                    updateMoment: subscription.updateMoment ?? Date.now(),
+                },
             };
+
 
             ConnectorService.addSubscription({
                 connectorType: this.connectorType,
@@ -1559,7 +1667,7 @@ export class BinanceService implements OnModuleInit, DataSource {
             if (this.isEmitToRedisEnabled) {
                 this.client.emit(subscriptionType, subscriptionValue);
             }
-        } catch (err) {
+        } catch (err: any) {
             this.logger.error(`Error in handlerForCandle: ${err?.message || err}`);
         }
     };
@@ -1676,7 +1784,7 @@ export class BinanceService implements OnModuleInit, DataSource {
                     });
 
                 }
-            } catch (err) {
+            } catch (err: any) {
                 this.logger.error(`Error in candleAdapter: ${err?.message || err}`);
             }
         };
@@ -1708,8 +1816,8 @@ export class BinanceService implements OnModuleInit, DataSource {
                         marketType,
                         symbol: { name: item.asset },
                         walletBalance: parseFloat(item.walletBalance),
-                        availableBalance: null,
-                        price: [{ currency: 'USDT', value: null }]
+                        availableBalance: 0,
+                        // price: [{ currency: 'USDT', value: null }]
                     }
 
                     const index = account.assets.findIndex(q => q.symbol == asset.symbol)
@@ -1727,7 +1835,7 @@ export class BinanceService implements OnModuleInit, DataSource {
                         entryPrice: parseFloat(item.entryPrice),
                         initialMargin: 0,
                         leverage: 0,
-                        side: null
+                        side: (item.positionSide == 'LONG') ? TradeSide.LONG : TradeSide.SHORT
                     }
 
                     const IMR = 1 / position.leverage
