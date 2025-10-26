@@ -1,33 +1,35 @@
 # ───────────────────────────────
-# Stage 1: build
+# Stage 1: Build
 # ───────────────────────────────
-FROM node:18.17.1-alpine3.18 AS builder
+FROM node:20.11.1-alpine3.19 AS builder
 WORKDIR /usr/src/app
 
-# Copy only package manifests for caching
+# Устанавливаем bash и coreutils (иногда нужны для скриптов)
+RUN apk add --no-cache bash coreutils
+
+# Копируем только манифесты для кеширования зависимостей
 COPY package*.json ./
 
-# Install root dependencies (shared tooling, build scripts, etc.)
-# RUN npm ci
+# Устанавливаем общие зависимости (build tools, shared scripts)
 RUN npm install --no-fund --no-audit
 
-# Copy entire repo
+# Копируем весь монорепозиторий
 COPY . .
 
-# 🧩 Remove local path references to @barfinex/* (use npm registry versions instead)
+# 🧩 Удаляем локальные ссылки на @barfinex/*,
+# чтобы использовать опубликованные npm-пакеты
 RUN node -e "\
     const fs = require('fs'); \
-    const pkg = JSON.parse(fs.readFileSync('./apps/provider/package.json')); \
+    const pkgPath = 'apps/provider/package.json'; \
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8')); \
     for (const dep in pkg.dependencies) { \
-    if (dep.startsWith('@barfinex/')) { \
-    delete pkg.dependencies[dep]; \
+    if (dep.startsWith('@barfinex/')) delete pkg.dependencies[dep]; \
     } \
-    } \
-    fs.writeFileSync('./apps/provider/package.json', JSON.stringify(pkg, null, 2)); \
+    fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2)); \
     "
 
-# ✅ Install all @barfinex/* packages from npm (latest versions)
-RUN npm install \
+# ✅ Устанавливаем актуальные версии опубликованных пакетов @barfinex/*
+RUN npm install --no-fund --no-audit --save \
     @barfinex/types \
     @barfinex/utils \
     @barfinex/key \
@@ -37,24 +39,32 @@ RUN npm install \
     @barfinex/orders \
     @barfinex/detector \
     @barfinex/lib-provider-ws-bridge \
-    @barfinex/telegram --save
+    @barfinex/telegram
 
-# Build only the provider app (monorepo aware)
+# 🏗️ Собираем только provider-приложение
 RUN npm run build:provider
 
+
 # ───────────────────────────────
-# Stage 2: runtime
+# Stage 2: Runtime
 # ───────────────────────────────
-FROM node:18.17.1-alpine3.18 AS runtime
+FROM node:20.11.1-alpine3.19 AS runtime
 WORKDIR /usr/src/app
 
-# Copy built provider service
+# Копируем собранное приложение
 COPY --from=builder /usr/src/app/dist/apps/provider ./dist
 
-# Copy package manifests for runtime deps
+# Копируем package.json для продовых зависимостей
 COPY package*.json ./
-#RUN npm ci --omit=dev
-RUN npm install --omit=dev
 
-# Run provider in production mode
+# Устанавливаем только продовые зависимости
+RUN npm install --omit=dev --no-fund --no-audit
+
+# Среда запуска
+ENV NODE_ENV=production
+
+# Открываем порт, если нужно (NestJS по умолчанию 3000)
+EXPOSE 3000
+
+# Запускаем сервис
 CMD ["npm", "run", "start:provider:prod"]
