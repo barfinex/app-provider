@@ -52,7 +52,8 @@ COPY --from=builder /usr/src/app/dist/apps/provider ./dist
 
 # Copy package manifests for runtime deps
 COPY package*.json ./
-RUN npm ci --omit=dev
+#RUN npm ci --omit=dev
+RUN npm install --omit=dev
 
 # Run provider in production mode
 CMD ["npm", "run", "start:provider:prod"]
