@@ -1,0 +1,110 @@
+{
+    "branches": [
+        "main"
+    ],
+    "repositoryUrl": "https://github.com/barfinex/app-provider",
+    "tagFormat": "v${version}",
+    "plugins": [
+        [
+            "@semantic-release/commit-analyzer",
+            {
+                "preset": "conventionalcommits",
+                "releaseRules": [
+                    {
+                        "type": "docs",
+                        "release": false
+                    },
+                    {
+                        "type": "chore",
+                        "release": false
+                    },
+                    {
+                        "type": "refactor",
+                        "release": "patch"
+                    },
+                    {
+                        "type": "style",
+                        "release": false
+                    },
+                    {
+                        "type": "test",
+                        "release": false
+                    }
+                ]
+            }
+        ],
+        [
+            "@semantic-release/release-notes-generator",
+            {
+                "preset": "conventionalcommits",
+                "presetConfig": {
+                    "types": [
+                        {
+                            "type": "feat",
+                            "section": "✨ Features",
+                            "hidden": false
+                        },
+                        {
+                            "type": "fix",
+                            "section": "🐛 Fixes",
+                            "hidden": false
+                        },
+                        {
+                            "type": "perf",
+                            "section": "⚡ Performance",
+                            "hidden": false
+                        },
+                        {
+                            "type": "refactor",
+                            "section": "🧠 Refactors",
+                            "hidden": false
+                        },
+                        {
+                            "type": "chore",
+                            "section": "🧩 Maintenance",
+                            "hidden": true
+                        },
+                        {
+                            "type": "docs",
+                            "section": "📝 Docs",
+                            "hidden": true
+                        },
+                        {
+                            "type": "test",
+                            "section": "✅ Tests",
+                            "hidden": true
+                        }
+                    ]
+                }
+            }
+        ],
+        [
+            "@semantic-release/changelog",
+            {
+                "changelogFile": "apps/provider/CHANGELOG.md",
+                "changelogTitle": "# 🧾 Changelog (app-provider)"
+            }
+        ],
+        [
+            "@semantic-release/git",
+            {
+                "assets": [
+                    "apps/provider/CHANGELOG.md"
+                ],
+                "message": "chore(release): v${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
+            }
+        ],
+        "semantic-release-export-data",
+        [
+            "@semantic-release/github",
+            {
+                "assets": [
+                    {
+                        "path": "apps/provider/CHANGELOG.md",
+                        "label": "Changelog"
+                    }
+                ]
+            }
+        ]
+    ]
+}
