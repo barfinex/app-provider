@@ -4,19 +4,19 @@
 FROM node:20.11.1-alpine3.19 AS builder
 WORKDIR /usr/src/app
 
-# Установим bash/coreutils (для совместимости)
+# Установим системные утилиты (bash/coreutils)
 RUN apk add --no-cache bash coreutils
 
-# Копируем package.json и package-lock.json из apps/provider
-COPY package*.json ./
+# 🟢 Копируем именно package.json из .public
+COPY .public/package*.json ./package.json
 
 # Устанавливаем зависимости (без audit и fund)
 RUN npm install --no-fund --no-audit
 
-# Копируем весь исходный код из apps/provider
+# Копируем всё содержимое provider (src/, tsconfig*, и т.п.)
 COPY . .
 
-# 🧩 Удаляем локальные ссылки на @barfinex/* (используем версии с npm)
+# 🧩 Удаляем локальные ссылки на @barfinex/*
 RUN node -e "\
     const fs = require('fs'); \
     const pkgPath = 'package.json'; \
@@ -40,9 +40,8 @@ RUN npm install --no-fund --no-audit --save \
     @barfinex/provider-ws-bridge \
     @barfinex/telegram
 
-# 🏗️ Собираем provider (локально)
+# 🏗️ Сборка provider
 RUN npm run build
-
 
 # ───────────────────────────────
 # Stage 2: Runtime
@@ -50,11 +49,11 @@ RUN npm run build
 FROM node:20.11.1-alpine3.19 AS runtime
 WORKDIR /usr/src/app
 
-# Копируем собранный build
+# Копируем только собранные файлы
 COPY --from=builder /usr/src/app/dist ./dist
 
-# Копируем package.json и lock-файл
-COPY package*.json ./
+# Копируем package.json для запуска
+COPY .public/package*.json ./package.json
 
 # Устанавливаем только прод-зависимости
 RUN npm install --omit=dev --no-fund --no-audit
