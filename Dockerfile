@@ -8,7 +8,8 @@ WORKDIR /usr/src/app
 COPY package*.json ./
 
 # Install root dependencies (shared tooling, build scripts, etc.)
-RUN npm ci
+# RUN npm ci
+RUN npm install --no-fund --no-audit
 
 # Copy entire repo
 COPY . .
