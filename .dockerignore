@@ -1,6 +1,7 @@
-# Ignore everything by default except current app
-# (так как сборка идёт из apps/provider, нет смысла исключать другие apps)
-# Просто убедимся, что в образ не попадёт мусор
+# ───────────────────────────────
+# 🧱 General rule:
+# Ignore everything unnecessary in provider build context
+# ───────────────────────────────
 
 # -------------------------------
 # Sensitive files
@@ -50,10 +51,36 @@ dist/
 build/
 target/
 out/
+coverage/
 
 # -------------------------------
-# OS files
+# OS junk files
 # -------------------------------
 .DS_Store
 Thumbs.db
 *.~lock.*
+
+# -------------------------------
+# Local caches or lockfiles
+# -------------------------------
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# -------------------------------
+# ⚙️ Exclude nested node_modules
+# -------------------------------
+*/node_modules/
+*/dist/
+*/build/
+
+# -------------------------------
+# 🧩 Special handling for .public
+# -------------------------------
+# ❌ Ignore everything inside .public except package.json and lockfiles
+.public/*
+!.public/package.json
+!.public/package-lock.json
+!.public/yarn.lock
+!.public/pnpm-lock.yaml
