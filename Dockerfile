@@ -1,55 +1,58 @@
-# Use a lightweight Node.js base image
-FROM node:18.17.1-alpine3.18 AS development
-
-# Install necessary packages for time synchronization
-# RUN apk add --no-cache tzdata openntpd
-
-# Set the timezone to Europe/Moscow
-# ENV TZ=Europe/Moscow
-# RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
-
-
-# Add 8 seconds to the system time
-# RUN CURRENT_TIME=$(date +%s) && \
-#     NEW_TIME=$(($CURRENT_TIME + 8)) && \
-#     date -s "@$NEW_TIME"
-
-
-# Start the NTP client for time synchronization (optional if precise time is critical)
-# RUN ntpd -d -n -p pool.ntp.org
-
-# Set the working directory
+# ───────────────────────────────
+# Stage 1: build
+# ───────────────────────────────
+FROM node:18.17.1-alpine3.18 AS builder
 WORKDIR /usr/src/app
 
-# Copy only the root package.json and yarn.lock
-COPY package.json yarn.lock ./
+# Copy only package manifests for caching
+COPY package*.json ./
 
+# Install root dependencies (shared tooling, build scripts, etc.)
+RUN npm ci
 
-# Copy only the "provider" folder and essential config files
-COPY apps/provider ./apps/provider
-COPY libs ./libs
-COPY nest-cli.json .
-COPY tsconfig.json .
-COPY tsconfig.build.json .
-COPY config.json ./config.json
-COPY config.advisor.json ./config.advisor.json
-COPY config.detector.json ./config.detector.json
-COPY config.inspector.json ./config.inspector.json
-COPY config.provider.json ./config.provider.json
+# Copy entire repo
+COPY . .
 
-# Install root dependencies
-RUN yarn install --frozen-lockfile
+# 🧩 Remove local path references to @barfinex/* (use npm registry versions instead)
+RUN node -e "\
+    const fs = require('fs'); \
+    const pkg = JSON.parse(fs.readFileSync('./apps/provider/package.json')); \
+    for (const dep in pkg.dependencies) { \
+    if (dep.startsWith('@barfinex/')) { \
+    delete pkg.dependencies[dep]; \
+    } \
+    } \
+    fs.writeFileSync('./apps/provider/package.json', JSON.stringify(pkg, null, 2)); \
+    "
 
-RUN yarn build:provider
+# ✅ Install all @barfinex/* packages from npm (latest versions)
+RUN npm install \
+    @barfinex/types \
+    @barfinex/utils \
+    @barfinex/key \
+    @barfinex/config \
+    @barfinex/plugin-driver \
+    @barfinex/connectors \
+    @barfinex/orders \
+    @barfinex/detector \
+    @barfinex/lib-provider-ws-bridge \
+    @barfinex/telegram --save
 
-CMD [ "yarn", "start:provider:prod" ]
+# Build only the provider app (monorepo aware)
+RUN npm run build:provider
 
-# Install dependencies specific to the "provider" app
-# WORKDIR /usr/src/app/apps/provider
-# RUN yarn install --frozen-lockfile
+# ───────────────────────────────
+# Stage 2: runtime
+# ───────────────────────────────
+FROM node:18.17.1-alpine3.18 AS runtime
+WORKDIR /usr/src/app
 
-# Build the project
-# RUN yarn build:provider
+# Copy built provider service
+COPY --from=builder /usr/src/app/dist/apps/provider ./dist
 
-# Specify the command to run the application
-# CMD ["yarn", "start:provider:prod"]
+# Copy package manifests for runtime deps
+COPY package*.json ./
+RUN npm ci --omit=dev
+
+# Run provider in production mode
+CMD ["npm", "run", "start:provider:prod"]
