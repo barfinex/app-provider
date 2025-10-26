@@ -1,31 +1,40 @@
-apps/*
-!apps/provider
+# Ignore everything by default except current app
+# (так как сборка идёт из apps/provider, нет смысла исключать другие apps)
+# Просто убедимся, что в образ не попадёт мусор
 
-# Excluding confidential files
+# -------------------------------
+# Sensitive files
+# -------------------------------
 .env
 .env.*
 *.pem
 *.key
 *.crt
 secrets/
-.yaml
-.yml
-.bat
-.conf
+*.yaml
+*.yml
+*.bat
+*.conf
 init-mongo.js
 mongo-init.js
 
-# Excluding version control files
+# -------------------------------
+# Version control
+# -------------------------------
 .git
 .gitignore
 .gitattributes
 
-# Excluding local settings and IDE files
+# -------------------------------
+# IDE & local configs
+# -------------------------------
 .idea/
 .vscode/
 *.iml
 
-# Excluding temporary files and artifacts
+# -------------------------------
+# Temp & logs
+# -------------------------------
 *.log
 *.tmp
 *.pid
@@ -33,14 +42,18 @@ mongo-init.js
 *.swo
 *.bak
 
-# Excluding build and cache folders
+# -------------------------------
+# Build artifacts & caches
+# -------------------------------
 node_modules/
 dist/
 build/
 target/
 out/
 
-# Excluding operating system files
+# -------------------------------
+# OS files
+# -------------------------------
 .DS_Store
 Thumbs.db
 *.~lock.*

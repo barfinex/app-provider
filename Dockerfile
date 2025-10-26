@@ -4,23 +4,22 @@
 FROM node:20.11.1-alpine3.19 AS builder
 WORKDIR /usr/src/app
 
-# Устанавливаем bash и coreutils (иногда нужны для скриптов)
+# Установим bash/coreutils (для совместимости)
 RUN apk add --no-cache bash coreutils
 
-# Копируем только манифесты для кеширования зависимостей
+# Копируем package.json и package-lock.json из apps/provider
 COPY package*.json ./
 
-# Устанавливаем общие зависимости (build tools, shared scripts)
+# Устанавливаем зависимости (без audit и fund)
 RUN npm install --no-fund --no-audit
 
-# Копируем весь монорепозиторий
+# Копируем весь исходный код из apps/provider
 COPY . .
 
-# 🧩 Удаляем локальные ссылки на @barfinex/*,
-# чтобы использовать опубликованные npm-пакеты
+# 🧩 Удаляем локальные ссылки на @barfinex/* (используем версии с npm)
 RUN node -e "\
     const fs = require('fs'); \
-    const pkgPath = 'apps/provider/package.json'; \
+    const pkgPath = 'package.json'; \
     const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8')); \
     for (const dep in pkg.dependencies) { \
     if (dep.startsWith('@barfinex/')) delete pkg.dependencies[dep]; \
@@ -28,7 +27,7 @@ RUN node -e "\
     fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2)); \
     "
 
-# ✅ Устанавливаем актуальные версии опубликованных пакетов @barfinex/*
+# ✅ Устанавливаем опубликованные @barfinex/* пакеты
 RUN npm install --no-fund --no-audit --save \
     @barfinex/types \
     @barfinex/utils \
@@ -38,11 +37,11 @@ RUN npm install --no-fund --no-audit --save \
     @barfinex/connectors \
     @barfinex/orders \
     @barfinex/detector \
-    @barfinex/lib-provider-ws-bridge \
+    @barfinex/provider-ws-bridge \
     @barfinex/telegram
 
-# 🏗️ Собираем только provider-приложение
-RUN npm run build:provider
+# 🏗️ Собираем provider (локально)
+RUN npm run build
 
 
 # ───────────────────────────────
@@ -51,20 +50,16 @@ RUN npm run build:provider
 FROM node:20.11.1-alpine3.19 AS runtime
 WORKDIR /usr/src/app
 
-# Копируем собранное приложение
-COPY --from=builder /usr/src/app/dist/apps/provider ./dist
+# Копируем собранный build
+COPY --from=builder /usr/src/app/dist ./dist
 
-# Копируем package.json для продовых зависимостей
+# Копируем package.json и lock-файл
 COPY package*.json ./
 
-# Устанавливаем только продовые зависимости
+# Устанавливаем только прод-зависимости
 RUN npm install --omit=dev --no-fund --no-audit
 
-# Среда запуска
 ENV NODE_ENV=production
-
-# Открываем порт, если нужно (NestJS по умолчанию 3000)
 EXPOSE 3000
 
-# Запускаем сервис
-CMD ["npm", "run", "start:provider:prod"]
+CMD ["npm", "run", "start:prod"]
