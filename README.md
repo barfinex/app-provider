@@ -1,6 +1,30 @@
 # Provider Service
 
-The `provider` service is part of the `barfin-network` ecosystem. It is designed to handle operations related to financial data, asset management, and integration with external financial APIs. This service is modular and built using the **NestJS** framework for scalability and maintainability.
+[![release](https://img.shields.io/github/v/release/barfinex/app-provider?logo=github&color=2ea043)](https://github.com/barfinex/app-provider/releases)
+[![docker](https://img.shields.io/badge/docker-ghcr.io%2Fbarfinex%2Fprovider-blue?logo=docker)](https://ghcr.io/barfinex/provider)
+[![image-size](https://img.shields.io/docker/image-size/barfinex/provider/latest?label=image%20size)](https://ghcr.io/barfinex/provider)
+[![build](https://img.shields.io/github/actions/workflow/status/barfinex/apps-monorepo/publish-app-provider.yml?label=build&logo=githubactions)](https://github.com/barfinex/apps-monorepo/actions/workflows/publish-app-provider.yml)
+
+---
+
+# Provider Service
+
+The `provider` service is part of the `barfinex` ecosystem. 
+It is designed to handle operations related to financial data, asset management, and integration with external financial APIs. 
+This service is modular and built using the **NestJS** framework for scalability and maintainability.
+
+---
+
+## 🚀 Deployment
+
+This service is automatically published via **GitHub Actions** and **semantic-release**.  
+Each successful build exports the codebase, creates a GitHub Release, and publishes a Docker image to the GitHub Container Registry (GHCR):
+
+```bash
+docker pull ghcr.io/barfinex/provider:latest
+# or a specific version
+docker pull ghcr.io/barfinex/provider:v1.0.0
+```
 
 ---
 
