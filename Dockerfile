@@ -6,24 +6,29 @@ WORKDIR /usr/src/app
 
 RUN apk add --no-cache bash coreutils
 
-# 🟢 Копируем из корня монорепы (а не из .public)
+# 🟢 Копируем настоящий package.json приложения
+COPY apps/provider/package*.json ./apps/provider/
+
+# 🟢 Копируем root package.json и tsconfig для компиляции
 COPY package*.json ./
 COPY tsconfig*.json ./
+
+# 🟢 Устанавливаем зависимости (включая class-transformer и т.д.)
+RUN npm install --no-fund --no-audit
+
+# 🟣 Копируем исходники
 COPY libs ./libs
 COPY apps/provider ./apps/provider
-
-# Устанавливаем зависимости монорепы
-RUN npm install --no-fund --no-audit
 
 # 🧩 Удаляем локальные ссылки на @barfinex/*
 RUN node -e "\
     const fs = require('fs'); \
-    const pkg = JSON.parse(fs.readFileSync('package.json', 'utf-8')); \
+    const pkg = JSON.parse(fs.readFileSync('apps/provider/package.json', 'utf-8')); \
     for (const k in pkg.dependencies) if (k.startsWith('@barfinex/')) delete pkg.dependencies[k]; \
-    fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2)); \
+    fs.writeFileSync('apps/provider/package.json', JSON.stringify(pkg, null, 2)); \
     "
 
-# ✅ Устанавливаем опубликованные пакеты @barfinex/*
+# ✅ Устанавливаем опубликованные @barfinex/* пакеты
 RUN npm install --no-fund --no-audit --save \
     @barfinex/types \
     @barfinex/utils \
@@ -36,7 +41,7 @@ RUN npm install --no-fund --no-audit --save \
     @barfinex/provider-ws-bridge \
     @barfinex/telegram
 
-# 🏗️ Сборка через корневой package.json (теперь команда найдётся)
+# 🏗️ Сборка
 RUN npm run build:provider
 
 # ───────────────────────────────
@@ -45,9 +50,8 @@ RUN npm run build:provider
 FROM node:20.11.1-alpine3.19 AS runtime
 WORKDIR /usr/src/app
 
-# Копируем только сборку и публичный package.json
 COPY --from=builder /usr/src/app/dist ./dist
-COPY apps/provider/.public/package*.json ./package.json
+COPY apps/provider/package*.json ./
 
 RUN npm install --omit=dev --no-fund --no-audit
 

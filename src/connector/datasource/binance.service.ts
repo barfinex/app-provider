@@ -74,7 +74,7 @@ import { Repository } from "typeorm";
 import { ConfigService } from "@barfinex/config";
 import { CandleService } from '../../candle/candle.service';
 import { CandleEntity } from "../../candle/candle.entity";
-import { candleMapper } from "@barfinex/utils/src";
+import { candleMapper } from "@barfinex/utils";
 
 @Injectable()
 export class BinanceService implements OnModuleInit, DataSource {
