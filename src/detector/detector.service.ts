@@ -7,7 +7,7 @@ import { DetectorEntity } from './detector.entity';
 import { Detector, MarketType, ConnectorType, TimeFrame, Trade, Symbol, Provider } from '@barfinex/types';
 import { ConnectorService } from '../connector/connector.service';
 import { OrderService } from '../order/order.service';
-import { Candle } from 'tinkoff-invest-api/cjs/generated/marketdata';
+// import { Candle } from 'tinkoff-invest-api/cjs/generated/marketdata';
 import { plainToInstance } from 'class-transformer';
 import { Indicator } from '@barfinex/types';
 
@@ -296,31 +296,33 @@ export class DetectorService {
         const { sysname, key, symbol, interval, orderBy } = options
 
 
-        let result: Candle[] = []
-        const detector = await this.getDetector({ sysname, key })
+        // let result: Candle[] = []
+        // const detector = await this.getDetector({ sysname, key })
 
-        for (const provider of detector.providers) {
-            if (options && provider.restApiUrl) {
-                try {
-                    let url = `${provider.restApiUrl}/symbols/${symbol}/candles/${interval}`;
-                    if (orderBy) url += '?orderBy=' + orderBy
-                    const request = this.http
-                        .get(url)
-                        .pipe(map((res) => res.data))
-                        .pipe(
-                            catchError((err) => {
-                                throw new ForbiddenException(`${url} ${err}`);
-                            }),
-                        );
-                    result = await lastValueFrom(request)
-                } catch { }
-            }
-
-
-        }
+        // for (const provider of detector.providers) {
+        //     if (options && provider.restApiUrl) {
+        //         try {
+        //             let url = `${provider.restApiUrl}/symbols/${symbol}/candles/${interval}`;
+        //             if (orderBy) url += '?orderBy=' + orderBy
+        //             const request = this.http
+        //                 .get(url)
+        //                 .pipe(map((res) => res.data))
+        //                 .pipe(
+        //                     catchError((err) => {
+        //                         throw new ForbiddenException(`${url} ${err}`);
+        //                     }),
+        //                 );
+        //             result = await lastValueFrom(request)
+        //         } catch { }
+        //     }
 
 
-        return result
+        // }
+
+
+        // return result
+
+        return null
     }
 
 
