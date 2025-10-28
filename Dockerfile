@@ -4,30 +4,26 @@
 FROM node:20.11.1-alpine3.19 AS builder
 WORKDIR /usr/src/app
 
-# Установим системные утилиты (bash/coreutils)
 RUN apk add --no-cache bash coreutils
 
-# 🟢 Копируем именно package.json из .public
-COPY .public/package*.json ./package.json
+# 🟢 Копируем из корня монорепы (а не из .public)
+COPY package*.json ./
+COPY tsconfig*.json ./
+COPY libs ./libs
+COPY apps/provider ./apps/provider
 
-# Устанавливаем зависимости (без audit и fund)
+# Устанавливаем зависимости монорепы
 RUN npm install --no-fund --no-audit
-
-# Копируем всё содержимое provider (src/, tsconfig*, и т.п.)
-COPY . .
 
 # 🧩 Удаляем локальные ссылки на @barfinex/*
 RUN node -e "\
     const fs = require('fs'); \
-    const pkgPath = 'package.json'; \
-    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8')); \
-    for (const dep in pkg.dependencies) { \
-    if (dep.startsWith('@barfinex/')) delete pkg.dependencies[dep]; \
-    } \
-    fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2)); \
+    const pkg = JSON.parse(fs.readFileSync('package.json', 'utf-8')); \
+    for (const k in pkg.dependencies) if (k.startsWith('@barfinex/')) delete pkg.dependencies[k]; \
+    fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2)); \
     "
 
-# ✅ Устанавливаем опубликованные @barfinex/* пакеты
+# ✅ Устанавливаем опубликованные пакеты @barfinex/*
 RUN npm install --no-fund --no-audit --save \
     @barfinex/types \
     @barfinex/utils \
@@ -40,8 +36,8 @@ RUN npm install --no-fund --no-audit --save \
     @barfinex/provider-ws-bridge \
     @barfinex/telegram
 
-# 🏗️ Сборка provider
-RUN npm run build
+# 🏗️ Сборка через корневой package.json (теперь команда найдётся)
+RUN npm run build:provider
 
 # ───────────────────────────────
 # Stage 2: Runtime
@@ -49,13 +45,10 @@ RUN npm run build
 FROM node:20.11.1-alpine3.19 AS runtime
 WORKDIR /usr/src/app
 
-# Копируем только собранные файлы
+# Копируем только сборку и публичный package.json
 COPY --from=builder /usr/src/app/dist ./dist
+COPY apps/provider/.public/package*.json ./package.json
 
-# Копируем package.json для запуска
-COPY .public/package*.json ./package.json
-
-# Устанавливаем только прод-зависимости
 RUN npm install --omit=dev --no-fund --no-audit
 
 ENV NODE_ENV=production

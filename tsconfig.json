@@ -1,18 +1,40 @@
 {
-  "extends": "./tsconfig.app.json",
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "rootDir": "./src",
+    "outDir": "../../dist/apps/provider",
     "composite": true,
-    "tsBuildInfoFile": "../../dist/apps/provider.tsbuildinfo"
+    "declaration": true,
+    "incremental": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "useDefineForClassFields": false,
+    "strict": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": "../../"
   },
   "include": [
     "src"
   ],
   "references": [
     {
+      "path": "../../libs/types"
+    },
+    {
       "path": "../../libs/utils"
     },
     {
       "path": "../../libs/key"
+    },
+    {
+      "path": "../../libs/config"
     },
     {
       "path": "../../libs/plugin-driver"
@@ -24,16 +46,13 @@
       "path": "../../libs/orders"
     },
     {
-      "path": "../../libs/config"
-    },
-    {
-      "path": "../../libs/detector"
-    },
-    {
       "path": "../../libs/provider-ws-bridge"
     },
     {
       "path": "../../libs/telegram"
+    },
+    {
+      "path": "../../libs/detector"
     }
   ]
 }

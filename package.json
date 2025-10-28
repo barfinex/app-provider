@@ -4,25 +4,29 @@
     "description": "Financial data and integration service for the Barfinex ecosystem. Provides connectors, WebSocket bridges, and unified market data feeds.",
     "author": "Barfinex",
     "license": "Apache-2.0",
-    "main": "dist/main.js",
+    "main": "dist/apps/provider/main.js",
     "scripts": {
-        "build": "tsc -p tsconfig.app.json",
-        "start": "node dist/main.js",
-        "start:dev": "nest start --watch",
-        "lint": "eslint 'src/**/*.ts' --fix",
-        "test": "jest"
+        "start:prod": "node dist/apps/provider/main.js"
     },
     "dependencies": {
         "@nestjs/common": "^10.3.4",
         "@nestjs/core": "^10.3.4",
         "@nestjs/config": "^3.2.0",
         "@nestjs/axios": "^3.0.0",
+        "@nestjs/typeorm": "^10.0.0",
+        "typeorm": "^0.3.19",
+        "pg": "^8.11.3",
         "reflect-metadata": "^0.2.1",
-        "rxjs": "^7.8.1"
-    },
-    "devDependencies": {
-        "@nestjs/cli": "^10.3.2",
-        "typescript": "^5.4.5",
-        "ts-node": "^10.9.1"
+        "rxjs": "^7.8.1",
+        "@barfinex/types": "latest",
+        "@barfinex/utils": "latest",
+        "@barfinex/key": "latest",
+        "@barfinex/config": "latest",
+        "@barfinex/plugin-driver": "latest",
+        "@barfinex/connectors": "latest",
+        "@barfinex/orders": "latest",
+        "@barfinex/detector": "latest",
+        "@barfinex/provider-ws-bridge": "latest",
+        "@barfinex/telegram": "latest"
     }
 }
