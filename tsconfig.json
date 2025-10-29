@@ -6,7 +6,6 @@
     "moduleResolution": "node",
     "rootDir": "./src",
     "outDir": "../../dist/apps/provider",
-    "composite": true,
     "declaration": true,
     "incremental": true,
     "experimentalDecorators": true,
@@ -18,41 +17,9 @@
     "resolveJsonModule": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "baseUrl": "../../"
+    "baseUrl": "./src"
   },
   "include": [
     "src"
-  ],
-  "references": [
-    {
-      "path": "../../libs/types"
-    },
-    {
-      "path": "../../libs/utils"
-    },
-    {
-      "path": "../../libs/key"
-    },
-    {
-      "path": "../../libs/config"
-    },
-    {
-      "path": "../../libs/plugin-driver"
-    },
-    {
-      "path": "../../libs/connectors"
-    },
-    {
-      "path": "../../libs/orders"
-    },
-    {
-      "path": "../../libs/provider-ws-bridge"
-    },
-    {
-      "path": "../../libs/telegram"
-    },
-    {
-      "path": "../../libs/detector"
-    }
   ]
 }

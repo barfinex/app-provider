@@ -2,47 +2,27 @@
 # Stage 1: Build
 # ───────────────────────────────
 FROM node:20.11.1-alpine3.19 AS builder
-WORKDIR /usr/src/app
 
-RUN apk add --no-cache bash coreutils
+WORKDIR /usr/src/monorepo
+RUN apk add --no-cache bash coreutils git
 
-# 🟢 Копируем настоящий package.json приложения
-COPY apps/provider/package*.json ./apps/provider/
-
-# 🟢 Копируем root package.json и tsconfig для компиляции
-COPY package*.json ./
+# 🧩 Copy project dependencies & configs
 COPY tsconfig*.json ./
-
-# 🟢 Устанавливаем зависимости (включая class-transformer и т.д.)
-RUN npm install --no-fund --no-audit
-
-# 🟣 Копируем исходники
 COPY libs ./libs
-COPY apps/provider ./apps/provider
+COPY apps/provider/package*.json ./apps/provider/
+COPY apps/provider/tsconfig*.json ./apps/provider/
+COPY apps/provider/src ./apps/provider/src
 
-# 🧩 Удаляем локальные ссылки на @barfinex/*
-RUN node -e "\
-    const fs = require('fs'); \
-    const pkg = JSON.parse(fs.readFileSync('apps/provider/package.json', 'utf-8')); \
-    for (const k in pkg.dependencies) if (k.startsWith('@barfinex/')) delete pkg.dependencies[k]; \
-    fs.writeFileSync('apps/provider/package.json', JSON.stringify(pkg, null, 2)); \
-    "
+# ⚙️ Install dependencies
+WORKDIR /usr/src/monorepo/apps/provider
+RUN if [ -f package-lock.json ]; then \
+    echo "Using npm ci (lockfile found)" && npm ci --no-fund --no-audit; \
+    else \
+    echo "Using npm install (no lockfile found)" && npm install --no-fund --no-audit; \
+    fi
 
-# ✅ Устанавливаем опубликованные @barfinex/* пакеты
-RUN npm install --no-fund --no-audit --save \
-    @barfinex/types \
-    @barfinex/utils \
-    @barfinex/key \
-    @barfinex/config \
-    @barfinex/plugin-driver \
-    @barfinex/connectors \
-    @barfinex/orders \
-    @barfinex/detector \
-    @barfinex/provider-ws-bridge \
-    @barfinex/telegram
-
-# 🏗️ Сборка
-RUN npm run build:provider
+# 🏗️ Build TypeScript (absolute path fix)
+RUN npx tsc -p /usr/src/monorepo/apps/provider/tsconfig.json
 
 # ───────────────────────────────
 # Stage 2: Runtime
@@ -50,12 +30,23 @@ RUN npm run build:provider
 FROM node:20.11.1-alpine3.19 AS runtime
 WORKDIR /usr/src/app
 
-COPY --from=builder /usr/src/app/dist ./dist
-COPY apps/provider/package*.json ./
-
-RUN npm install --omit=dev --no-fund --no-audit
-
 ENV NODE_ENV=production
-EXPOSE 3000
 
+# 📦 Copy build artifacts (from monorepo root dist)
+COPY --from=builder /usr/src/monorepo/dist/apps/provider ./dist
+COPY --from=builder /usr/src/monorepo/apps/provider/package*.json ./
+
+# 🧹 Install only production deps
+RUN if [ -f package-lock.json ]; then \
+    echo "Installing prod deps via npm ci" && npm ci --omit=dev --no-fund --no-audit; \
+    else \
+    echo "Installing prod deps via npm install" && npm install --omit=dev --no-fund --no-audit; \
+    fi && \
+    npm cache clean --force
+
+# 👤 Secure runtime user
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+USER appuser
+
+EXPOSE 3000
 CMD ["npm", "run", "start:prod"]

@@ -1,9 +1,11 @@
 # Provider Service
 
 [![release](https://img.shields.io/github/v/release/barfinex/app-provider?logo=github&color=2ea043)](https://github.com/barfinex/app-provider/releases)
-[![docker](https://img.shields.io/badge/docker-ghcr.io%2Fbarfinex%2Fprovider-blue?logo=docker)](https://ghcr.io/barfinex/provider)
-[![image-size](https://img.shields.io/docker/image-size/barfinex/provider/latest?label=image%20size)](https://ghcr.io/barfinex/provider)
 [![build](https://img.shields.io/github/actions/workflow/status/barfinex/apps-monorepo/publish-app-provider.yml?label=build&logo=githubactions)](https://github.com/barfinex/apps-monorepo/actions/workflows/publish-app-provider.yml)
+[![ghcr](https://img.shields.io/badge/GHCR-ghcr.io%2Fbarfinex%2Fprovider-blue?logo=github&logoColor=white)](https://ghcr.io/barfinex/provider)
+[![dockerhub](https://img.shields.io/badge/DockerHub-barfinex%2Fprovider-blue?logo=docker&logoColor=white)](https://hub.docker.com/r/barfinex/provider)
+[![image-size](https://img.shields.io/docker/image-size/barfinex/provider/latest?label=image%20size)](https://ghcr.io/barfinex/provider)
+[![version](https://img.shields.io/badge/version-auto--updated-success)](https://ghcr.io/barfinex/provider)
 
 ---
 

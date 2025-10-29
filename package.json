@@ -28,5 +28,14 @@
         "@barfinex/detector": "latest",
         "@barfinex/provider-ws-bridge": "latest",
         "@barfinex/telegram": "latest"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/barfinex/app-provider.git"
+    },
+    "private": false,
+    "homepage": "https://github.com/barfinex/app-provider#readme",
+    "bugs": {
+        "url": "https://github.com/barfinex/app-provider/issues"
     }
 }
