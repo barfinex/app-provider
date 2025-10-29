@@ -12,7 +12,6 @@ import {
 } from '@barfinex/types';
 
 import { RequestMarketData } from './candle.interfaces';
-
 import { createRequestBinance } from '@barfinex/connectors';
 import { requestAlpaca } from '@barfinex/connectors';
 import { AppError, ErrorEnvironment } from '../error';
