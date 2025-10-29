@@ -1,86 +1,99 @@
-# ───────────────────────────────
-# 🧱 General rule:
-# Ignore everything unnecessary in provider build context
-# ───────────────────────────────
-
-# -------------------------------
-# Sensitive files
-# -------------------------------
-.env
-.env.*
-*.pem
-*.key
-*.crt
-secrets/
-*.yaml
-*.yml
-*.bat
-*.conf
-init-mongo.js
-mongo-init.js
-
-# -------------------------------
-# Version control
-# -------------------------------
+# ========================
+# Base exclusions (general)
+# ========================
 .git
 .gitignore
-.gitattributes
-
-# -------------------------------
-# IDE & local configs
-# -------------------------------
-.idea/
-.vscode/
-*.iml
-
-# -------------------------------
-# Temp & logs
-# -------------------------------
-*.log
-*.tmp
-*.pid
-*.swp
-*.swo
-*.bak
-
-# -------------------------------
-# Build artifacts & caches
-# -------------------------------
-node_modules/
-dist/
-build/
-target/
-out/
-coverage/
-
-# -------------------------------
-# OS junk files
-# -------------------------------
-.DS_Store
-Thumbs.db
-*.~lock.*
-
-# -------------------------------
-# Local caches or lockfiles
-# -------------------------------
+Dockerfile
+.dockerignore
+README.md
+LICENSE
 npm-debug.log*
 yarn-debug.log*
-yarn-error.log*
 pnpm-debug.log*
+lerna-debug.log*
+.eslintcache
+*.log
+*.pid
 
-# -------------------------------
-# ⚙️ Exclude nested node_modules
-# -------------------------------
-*/node_modules/
-*/dist/
-*/build/
+# ========================
+# Environment & secrets
+# ========================
+.env
+.env.*
+.env*.local
+.env.test
+docker.env
+cert/*.pem
+cert/*.key
+cert/*.crt
+keys/
+.keys/
 
-# -------------------------------
-# 🧩 Special handling for .public
-# -------------------------------
-# ❌ Ignore everything inside .public except package.json and lockfiles
-.public/*
-!.public/package.json
-!.public/package-lock.json
-!.public/yarn.lock
-!.public/pnpm-lock.yaml
+# ========================
+# Build artifacts
+# ========================
+dist/
+build/
+out/
+tmp/
+.cache/
+coverage/
+.nyc_output/
+logs/
+data/
+
+# ========================
+# Node packages
+# ========================
+node_modules/
+**/node_modules/
+
+# ========================
+# Monorepo libs (exclude built artifacts)
+# ========================
+libs/*/dist
+libs/*/build
+libs/*/out
+
+# ========================
+# Local dev & tools
+# ========================
+.vscode/
+.idea/
+.nx/
+*.iml
+*.swp
+
+# ========================
+# OS / System files
+# ========================
+.DS_Store
+Thumbs.db
+
+# ========================
+# Temporary archives / binaries
+# ========================
+*.zip
+*.tar
+*.gz
+*.7z
+*.rar
+*.exe
+*.dll
+*.so
+*.dylib
+
+# ========================
+# Keep only required app files
+# ========================
+
+# ✅ Keep source
+!src/**
+
+# ✅ Keep config files
+!tsconfig*.json
+!package.json
+!.releaserc
+
+# ✅ Keep public metadata (for README, build info)
+!.public/**
