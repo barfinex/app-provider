@@ -10,7 +10,6 @@ import {
     Symbol,
     Candle,
 } from '@barfinex/types';
-
 import { RequestMarketData } from './candle.interfaces';
 import { createRequestBinance } from '@barfinex/connectors';
 import { requestAlpaca } from '@barfinex/connectors';
