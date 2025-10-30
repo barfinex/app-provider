@@ -6,7 +6,7 @@
     "license": "Apache-2.0",
     "main": "dist/apps/provider/main.js",
     "scripts": {
-        "start:prod": "node dist/apps/provider/main.js"
+        "start:prod": "node dist/main.js"
     },
     "dependencies": {
         "@nestjs/common": "^10.3.4",
