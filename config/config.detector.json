@@ -1,0 +1,7 @@
+{
+  "general": {
+    "apiPort": 8101,
+    "sysName": "VolumeFollow",
+    "logLevel": "info22"
+  }
+}

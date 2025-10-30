@@ -1,0 +1,44 @@
+{
+  "general": {
+    "apiPort": 8008
+  },
+  "riskManagement": {
+    "takeProfitPercent": 2.5,
+    "stopLossPercent": 0.5,
+    "breakevenPercent": 0.08,
+    "maxDailyLossPercent": 5,
+    "maxDailyProfitPercent": 10,
+    "maxDrawdownPercent": 15,
+    "maxLossTradesPerDay": 3,
+    "maxTradesPerDay": 10,
+    "riskPerTradePercent": 2,
+    "minRiskRewardRatio": 2
+  },
+  "assetManagement": {
+    "excludedAssets": [
+      "BTC",
+      "ETH"
+    ],
+    "preferredAssets": [
+      "AAPL",
+      "GOOG"
+    ],
+    "slippageTolerancePercent": 0.5,
+    "spreadTolerancePercent": 1
+  },
+  "tradeSettings": {
+    "maxPositionHoldTime": 360,
+    "maxPositionSizePercent": 20,
+    "minPositionSizePercent": 1,
+    "maxLeverage": 10,
+    "defaultLeverage": 3,
+    "trailingStopPercent": 1.5,
+    "trailingTakeProfitPercent": 2
+  },
+  "strategyLogic": {
+    "cooldownPeriod": 30,
+    "maxConsecutiveLosses": 2,
+    "minROIThreshold": 2,
+    "maxROIThreshold": 50
+  }
+}
