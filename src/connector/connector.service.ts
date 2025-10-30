@@ -742,16 +742,16 @@ export class ConnectorService {
                 connector.orders.push(...(account.orders ?? []));
 
                 const marketIndex = connector.markets.findIndex(
-                    (m) => m.marketType === market.marketType
+                    (m: any) => m.marketType === market.marketType
                 );
 
                 if (marketIndex > -1) {
                     const targetMarket = connector.markets[marketIndex];
 
                     // ✅ Добавляем только новые символы (без дубликатов)
-                    const existingSymbols = new Set(targetMarket.symbols.map((s) => s.name));
+                    const existingSymbols = new Set(targetMarket.symbols.map((s: any) => s.name));
                     const newSymbols = (market.symbols ?? []).filter(
-                        (s) => !existingSymbols.has(s.name)
+                        (s: any) => !existingSymbols.has(s.name)
                     );
 
                     targetMarket.symbols.push(...newSymbols);

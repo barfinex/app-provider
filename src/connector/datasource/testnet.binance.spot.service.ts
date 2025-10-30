@@ -296,7 +296,7 @@ export class TestnetBinanceSpotService implements OnModuleInit, DataSource {
                     })
                 });
 
-                const filterAssets = account.assets.filter(q => q.symbol.name != currency)
+                const filterAssets = account.assets.filter((q: any) => q.symbol.name != currency)
 
                 for (let i = 0; i < filterAssets.length; i++) {
                     const asset = filterAssets[i];
@@ -742,9 +742,9 @@ export class TestnetBinanceSpotService implements OnModuleInit, DataSource {
         }
 
         const matchedConnector = config.provider.connectors.find(
-            c =>
+            (c: any) =>
                 c.connectorType === connectorType &&
-                c.markets?.some(m => m.marketType === marketType)
+                c.markets?.some((m: { marketType: MarketType }) => m.marketType === marketType)
         );
 
         if (!matchedConnector?.subscriptions) {
@@ -754,7 +754,7 @@ export class TestnetBinanceSpotService implements OnModuleInit, DataSource {
         }
 
         const matchedSubscription = matchedConnector.subscriptions.find(
-            s => s.type === subscriptionType
+            (s: { type: SubscriptionType }) => s.type === subscriptionType
         );
 
         if (!matchedSubscription) {

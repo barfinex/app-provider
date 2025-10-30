@@ -317,7 +317,7 @@ export class TestnetBinanceFuturesService implements OnModuleInit, DataSource {
                     })
                 });
 
-                const filterAssets = account.assets.filter(q => q.symbol.name != currency)
+                const filterAssets = account.assets.filter((q: any) => q.symbol.name != currency)
 
                 for (let i = 0; i < filterAssets.length; i++) {
                     const asset = filterAssets[i];
@@ -792,12 +792,12 @@ export class TestnetBinanceFuturesService implements OnModuleInit, DataSource {
             .getConfig()
             ?.provider
             ?.connectors
-            ?.find(c =>
+            ?.find((c: any) =>
                 c.connectorType === connectorType &&
-                c.markets?.some(m => m.marketType === marketType)
+                c.markets?.some((m: any) => m.marketType === marketType)
             )
             ?.subscriptions
-            ?.find(s => s.type === subscriptionType);
+            ?.find((s: any) => s.type === subscriptionType);
 
         if (!matchedSubscription) {
             throw new InternalServerErrorException(

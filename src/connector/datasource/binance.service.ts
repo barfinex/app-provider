@@ -154,7 +154,7 @@ export class BinanceService implements OnModuleInit, DataSource {
         const securityConfig = this.configService
             .getConfig()
             ?.provider
-            ?.connectors?.find(q => q.connectorType === this.connectorType);
+            ?.connectors?.find((q: { connectorType: any; }) => q.connectorType === this.connectorType);
 
 
 
@@ -396,7 +396,7 @@ export class BinanceService implements OnModuleInit, DataSource {
                     const connectors = config.provider?.connectors ?? [];
 
                     const securityConfig = connectors.find(
-                        q => q.connectorType === this.connectorType
+                        (q: { connectorType: any; }) => q.connectorType === this.connectorType
                     );
 
                     if (!securityConfig) {
@@ -510,7 +510,7 @@ export class BinanceService implements OnModuleInit, DataSource {
                 const accountInfoFutures_Positions = accountInfoFutures?.positions.filter(q => parseFloat(q.positionAmt) != 0);
                 accountInfoFutures_Positions?.forEach(element => {
 
-                    if (!account.symbols.find(q => q.name == element.symbol)) account.symbols.push({ name: element.symbol });
+                    if (!account.symbols.find((q: { name: string; }) => q.name == element.symbol)) account.symbols.push({ name: element.symbol });
 
                     account.positions.push({
                         connectorType: this.connectorType,
@@ -526,7 +526,7 @@ export class BinanceService implements OnModuleInit, DataSource {
 
                 });
 
-                const filterAssets = account.assets.filter(q => q.symbol.name != currency)
+                const filterAssets = account.assets.filter((q: { symbol: { name: string; }; }) => q.symbol.name != currency)
 
                 for (let i = 0; i < filterAssets.length; i++) {
                     const asset = filterAssets[i];
@@ -989,9 +989,9 @@ export class BinanceService implements OnModuleInit, DataSource {
         }
 
         const connector = config.provider.connectors.find(
-            c =>
+            (c: { connectorType: any; markets: any[]; }) =>
                 c.connectorType === this.connectorType &&
-                c.markets?.some(m => m.marketType === marketType)
+                c.markets?.some((m: { marketType: any; }) => m.marketType === marketType)
         );
 
         if (!connector) {
@@ -1434,15 +1434,16 @@ export class BinanceService implements OnModuleInit, DataSource {
         await this.symbolRepository.delete({ connectorType: this.connectorType, marketType });
 
         // сохраняем новые
-        const savedSymbols = symbols.map((symbol) =>
-            this.symbolRepository.create({
+        const savedSymbols = this.symbolRepository.create(
+            symbols.map((symbol) => ({
                 ...symbol,
                 symbol: symbol.name,
                 connectorType: this.connectorType,
                 marketType,
                 updatedAt: new Date(),
-            })
+            }))
         );
+        
         await this.symbolRepository.save(savedSymbols);
 
         this.logger.log(
@@ -1571,13 +1572,13 @@ export class BinanceService implements OnModuleInit, DataSource {
         }
 
         const connector = config.provider.connectors.find(
-            c =>
+            (c: { connectorType: any; markets: any[]; }) =>
                 c.connectorType === connectorType &&
-                c.markets?.some(m => m.marketType === marketType)
+                c.markets?.some((m: { marketType: any; }) => m.marketType === marketType)
         );
 
         const matchedSubscription = connector?.subscriptions?.find(
-            s => s.type === subscriptionType
+            (s: { type: any; }) => s.type === subscriptionType
         );
 
         if (!matchedSubscription) {
@@ -1823,7 +1824,7 @@ export class BinanceService implements OnModuleInit, DataSource {
                         // price: [{ currency: 'USDT', value: null }]
                     }
 
-                    const index = account.assets.findIndex(q => q.symbol == asset.symbol)
+                    const index = account.assets.findIndex((q: { symbol: any; }) => q.symbol == asset.symbol)
 
                     if (index != -1) account.assets.push(asset)
                     else account.assets[index] = asset
@@ -1845,12 +1846,12 @@ export class BinanceService implements OnModuleInit, DataSource {
                     position.initialMargin = position.quantity * position.entryPrice * IMR
                     position.side = (position.quantity > 0) ? TradeSide.LONG : TradeSide.SHORT
 
-                    const index = account.positions.findIndex(q => q.symbol == position.symbol)
+                    const index = account.positions.findIndex((q: { symbol: any; }) => q.symbol == position.symbol)
 
                     if (index != -1) account.positions.push(position)
                     else account.positions[index] = position
 
-                    if (!account.symbols.find(q => q.name == position.symbol.name)) account.symbols.push({ name: position.symbol.name })
+                    if (!account.symbols.find((q: { name: any; }) => q.name == position.symbol.name)) account.symbols.push({ name: position.symbol.name })
 
                     ConnectorService.setAccount(account)
                 })
