@@ -1,0 +1,178 @@
+{
+  "symbols": [
+    {
+      "name": "BTCUSDT",
+      "leverage": 10,
+      "quantity": 0.001
+    },
+    {
+      "name": "ETHUSDT",
+      "leverage": 10,
+      "quantity": 0.001
+    }
+  ],
+  "restApiToken": "${PROVIDER_API_TOKEN}",
+  "restApiUrl": "http://localhost:8081/api",
+  "connectors": [
+    {
+      "connectorType": "binance",
+      "key": "${BINANCE_API_KEY}",
+      "secret": "${BINANCE_API_SECRET}",
+      "markets": [
+        {
+          "marketType": "futures",
+          "symbols": [
+            {
+              "name": "BTCUSDT",
+              "leverage": 1
+            },
+            {
+              "name": "ETHUSDT",
+              "leverage": 1
+            }
+          ],
+          "commisions": {
+            "makerPercent": 0.02,
+            "takerPercent": 0.05
+          }
+        },
+        {
+          "marketType": "spot",
+          "symbols": [
+            {
+              "name": "BTCUSDT",
+              "leverage": 1
+            },
+            {
+              "name": "ETHUSDT",
+              "leverage": 1
+            }
+          ],
+          "commisions": {
+            "makerPercent": 0.02,
+            "takerPercent": 0.05
+          }
+        }
+      ],
+      "subscriptions": [
+        {
+          "type": "PROVIDER_MARKETDATA_TRADE",
+          "symbols": [
+            "BTCUSDT",
+            "ETHUSDT"
+          ],
+          "active": true
+        },
+        {
+          "type": "PROVIDER_MARKETDATA_ORDERBOOK",
+          "symbols": [
+            "BTCUSDT",
+            "ETHUSDT"
+          ],
+          "active": true
+        },
+        {
+          "type": "PROVIDER_MARKETDATA_CANDLE",
+          "symbols": [
+            "BTCUSDT",
+            "ETHUSDT"
+          ],
+          "connector": {
+            "maxHistoryDepthBars": 365
+          },
+          "intervals": [
+            "min1",
+            "min5",
+            "h1"
+          ],
+          "active": true
+        },
+        {
+          "type": "PROVIDER_ACCOUNT_EVENT",
+          "active": true
+        },
+        {
+          "type": "PROVIDER_ORDER_CREATE",
+          "symbols": [
+            "BTCUSDT",
+            "ETHUSDT"
+          ],
+          "active": true
+        },
+        {
+          "type": "PROVIDER_ORDER_CLOSE",
+          "symbols": [
+            "BTCUSDT",
+            "ETHUSDT"
+          ],
+          "active": true
+        },
+        {
+          "type": "PROVIDER_SYMBOLS",
+          "active": true
+        },
+        {
+          "type": "PROVIDER_SYMBOL_PRICES",
+          "active": true
+        },
+        {
+          "type": "INSPECTOR_EVENT",
+          "active": true
+        },
+        {
+          "type": "DETECTOR_EVENT",
+          "active": true
+        },
+        {
+          "type": "ADVISOR_EVENT",
+          "active": true
+        }
+      ]
+    },
+    {
+      "connectorType": "testnetBinanceSpot",
+      "key": "${TESTNET_BINANCE_SPOT_KEY}",
+      "secret": "${TESTNET_BINANCE_SPOT_SECRET}",
+      "markets": [
+        {
+          "marketType": "futures",
+          "symbols": [],
+          "commisions": {
+            "makerPercent": 0.02,
+            "takerPercent": 0.05
+          }
+        }
+      ]
+    },
+    {
+      "connectorType": "alpaca",
+      "key": "${ALPACA_API_KEY}",
+      "secret": "${ALPACA_API_SECRET}",
+      "markets": [
+        {
+          "marketType": "futures",
+          "symbols": [],
+          "commisions": {
+            "makerPercent": 0.02,
+            "takerPercent": 0.05
+          }
+        }
+      ]
+    },
+    {
+      "connectorType": "tinkoff",
+      "token": "${TINKOFF_API_TOKEN}",
+      "accountId": "${TINKOFF_ACCOUNT_ID}",
+      "markets": [
+        {
+          "marketType": "spot",
+          "symbols": [],
+          "commisions": {
+            "makerPercent": 0.02,
+            "takerPercent": 0.05
+          }
+        }
+      ]
+    }
+  ]
+}

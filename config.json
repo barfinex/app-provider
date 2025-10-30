@@ -1,0 +1,6 @@
+{
+  "provider": "file:config.provider.json",
+  "advisor": "file:config.advisor.json",
+  "inspector": "file:config.inspector.json",
+  "detector": "file:config.detector.json"
+}

@@ -1,0 +1,113 @@
+# ========================
+# Compiled output
+# ========================
+/dist
+/build
+/tmp
+/out
+
+# Private keys
+.keys/
+
+# Node & package managers
+node_modules/
+**/node_modules/
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+
+# ========================
+# Local data & runtime
+# ========================
+/data
+/logs
+*.log
+
+# Cache & temp
+.nx/cache
+.nx/workspace-data
+.cache/
+.eslintcache
+
+# ========================
+# Local certificates (mkcert)
+cert/*.pem
+cert/*.key
+cert/*.crt
+
+# ========================
+# Environment files (secrets)
+.env
+.env.*
+.env*.local
+.env.test
+docker.env
+
+# Keep example env templates (allow publishing)
+!/.env.example
+!**/.env.example
+
+# ========================
+# Library build outputs
+/libs/*/dist
+/dist
+*/dist
+**/dist
+
+# ========================
+# Tests
+/coverage
+/.nyc_output
+/junit.xml
+
+# ========================
+# IDEs and editors
+/.idea
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+
+# VSCode
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# ========================
+# OS & system
+.DS_Store
+Thumbs.db
+
+# ========================
+# Archives & binaries
+*.zip
+*.tar
+*.gz
+*.7z
+*.rar
+*.exe
+*.dll
+*.so
+*.dylib
+*.pdf
+
+# ========================
+# Misc
+package-lock.json
+yarn.lock
+
+# ========================
+# Special cases (apps)
+apps/*/node_modules
+libs/*/node_modules
+
+# — do not ignore .public folders
+!apps/*/.public
+!apps/*/.public/**
