@@ -11,7 +11,7 @@
 
 [![ghcr](https://img.shields.io/badge/GHCR-ghcr.io%2Fbarfinex%2Fprovider-blue?logo=github&logoColor=white)](https://ghcr.io/barfinex/provider)
 [![dockerhub](https://img.shields.io/badge/DockerHub-barfinex%2Fprovider-blue?logo=docker&logoColor=white)](https://hub.docker.com/r/barfinex/provider)
-[![image-size](https://img.shields.io/docker/image-size/barfinex/provider/latest?label=image%20size%2089MB?label=image%20size%2089MB?label=image%20size%2089MB?label=image%20size)](https://ghcr.io/barfinex/provider)
+[![image-size](https://img.shields.io/docker/image-size/barfinex/provider/latest?label=image%20size%2089MB?label=image%20size%2089MB?label=image%20size%2089MB?label=image%20size%2089MB?label=image%20size)](https://ghcr.io/barfinex/provider)
 [![version](https://img.shields.io/badge/version-v31-blue)](https://ghcr.io/barfinex/provider)
 
 ---

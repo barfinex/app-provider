@@ -142,6 +142,9 @@ export class BinanceService implements OnModuleInit, DataSource {
         } as RedisOptions);
 
 
+        console.log('this.configService.getConfig():', this.configService.getConfig());
+
+
         const providerKey = this.configService.getConfig().provider?.key;
         if (!providerKey) {
             throw new InternalServerErrorException('Provider key not found in configuration');
