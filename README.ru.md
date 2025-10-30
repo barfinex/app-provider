@@ -35,9 +35,11 @@
 и публикует Docker-образ в **GitHub Container Registry (GHCR)**:
 
 ```bash
+# === GitHub Container Registry ===
 docker pull ghcr.io/barfinex/provider:latest
-# или конкретную версию
-docker pull ghcr.io/barfinex/provider:v1.0.0
+
+# === Docker Hub ===
+docker pull barfinex/provider:latest
 ```
 
 ---

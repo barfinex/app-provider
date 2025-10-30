@@ -11,8 +11,8 @@
 
 [![ghcr](https://img.shields.io/badge/GHCR-ghcr.io%2Fbarfinex%2Fprovider-blue?logo=github&logoColor=white)](https://ghcr.io/barfinex/provider)
 [![dockerhub](https://img.shields.io/badge/DockerHub-barfinex%2Fprovider-blue?logo=docker&logoColor=white)](https://hub.docker.com/r/barfinex/provider)
-[![image-size](https://img.shields.io/docker/image-size/barfinex/provider/latest?label=image%20size)](https://ghcr.io/barfinex/provider)
-[![version](https://img.shields.io/badge/version-auto--updated-success)](https://ghcr.io/barfinex/provider)
+[![image-size](https://img.shields.io/docker/image-size/barfinex/provider/latest?label=image%20size%2089MB?label=image%20size)](https://ghcr.io/barfinex/provider)
+[![version](https://img.shields.io/badge/version-v31-blue)](https://ghcr.io/barfinex/provider)
 
 ---
 
@@ -33,9 +33,11 @@ Each successful build exports the codebase, creates a GitHub Release,
 and publishes a Docker image to the GitHub Container Registry (GHCR):
 
 ```bash
+# === GitHub Container Registry ===
 docker pull ghcr.io/barfinex/provider:latest
-# or pull a specific version
-docker pull ghcr.io/barfinex/provider:v1.0.0
+
+# === Docker Hub ===
+docker pull barfinex/provider:latest
 ```
 
 ---
