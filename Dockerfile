@@ -23,8 +23,11 @@ RUN if [ -f package-lock.json ]; then \
     echo "Using npm install (no lockfile found)" && npm install --no-fund --no-audit; \
     fi
 
-# 🏗️ Компиляция TypeScript
-RUN npx tsc -p /usr/src/monorepo/apps/provider/tsconfig.json
+# # 🏗️ Компиляция TypeScript
+# RUN npx tsc -p /usr/src/monorepo/apps/provider/tsconfig.json
+# 🏗️ Компиляция TypeScript (все библиотеки + provider)
+RUN npx tsc -b libs/types libs/utils libs/key libs/config libs/plugin-driver libs/connectors libs/orders libs/provider-ws-bridge libs/telegram libs/detector \
+    && npx tsc -b apps/provider
 
 # ───────────────────────────────
 # Stage 2: Runtime
