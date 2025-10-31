@@ -29,7 +29,7 @@ import { KeyService } from '@barfinex/key';
 @Injectable()
 export class ConnectorService {
 
-    public key: string
+    public key: string | undefined
 
     private readonly logger = new Logger(ConnectorService.name);
 

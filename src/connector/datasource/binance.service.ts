@@ -31,7 +31,8 @@ import Binance, {
     UserDataStreamEvent,
     TakeProfitMarketNewFuturesOrder,
     StopMarketNewFuturesOrder,
-    FuturesIncomeResult
+    FuturesIncomeResult,
+    Binance as BinanceClient
 } from 'binance-api-node';
 import { ClientProxy, Transport, ClientProxyFactory, RedisOptions } from '@nestjs/microservices';
 import {
@@ -102,7 +103,7 @@ export class BinanceService implements OnModuleInit, DataSource {
 
     delay = async (ms: number) => await new Promise(resolve => setTimeout(resolve, ms));
 
-    private readonly api: ReturnType<typeof Binance>;
+    private api?: BinanceClient;
 
     protected candles: Candle[] = [];
 
@@ -110,7 +111,7 @@ export class BinanceService implements OnModuleInit, DataSource {
         return this.candles[0];
     }
 
-    private readonly client: ClientProxy;
+    private client!: ClientProxy;
 
     protected providerKey: string | null = null
 
@@ -126,93 +127,102 @@ export class BinanceService implements OnModuleInit, DataSource {
 
     ) {
 
-        const tcpHost = process.env.REDIS_HOST || 'localhost';
-        const tcpPort = parseInt(process.env.REDIS_PORT ?? "6379", 10);
+        // конструктор остаётся "лёгким" — только DI
+    }
 
-        if (isNaN(tcpPort) || tcpPort < 0 || tcpPort > 65535) this.logger.error(`Invalid TCP port: ${tcpPort}`);
+    async onModuleInit() {
+        this.logger.log('🧩 BinanceService initializing...');
+
+        /* === 🧠 1. Подключение к Redis === */
+        const tcpHost = process.env.REDIS_HOST || 'localhost';
+        const tcpPort = Number(process.env.REDIS_PORT ?? '6379');
+
+        if (isNaN(tcpPort) || tcpPort <= 0 || tcpPort > 65535) {
+            this.logger.error(`Invalid Redis port: ${tcpPort}`);
+        }
 
         this.logger.log(`Connecting to Redis on ${tcpHost}:${tcpPort}`);
 
         this.client = ClientProxyFactory.create({
             transport: Transport.REDIS,
-            options: {
-                host: tcpHost,
-                port: tcpPort
-            },
+            options: { host: tcpHost, port: tcpPort },
         } as RedisOptions);
 
-
-        console.log('this.configService.getConfig():', this.configService.getConfig());
-
-
-        const providerKey = this.configService.getConfig().provider?.key;
-        if (!providerKey) {
-            throw new InternalServerErrorException('Provider key not found in configuration');
+        try {
+            await this.client.connect();
+            this.logger.log('✅ Connected to Redis successfully!');
+        } catch (error: any) {
+            this.logger.error('❌ Failed to connect to Redis:', error?.message || error);
         }
-        this.providerKey = providerKey;
 
-        const securityConfig = this.configService
-            .getConfig()
-            ?.provider
-            ?.connectors?.find((q: { connectorType: any; }) => q.connectorType === this.connectorType);
+        /* === ⚙️ 2. Загрузка конфигурации === */
+        const config = this.configService.getConfig();
+        // this.logger.debug('🔍 Loaded config:', config);
 
+        // Получаем блок provider
+        const providerConfig = config.provider;
+        if (!providerConfig?.connectors?.length) {
+            this.logger.error('Provider connectors not defined in configuration');
+            throw new InternalServerErrorException('No connectors found in provider configuration');
+        }
 
+        // Ищем конфиг конкретно для Binance
+        const connectorConfig = providerConfig.connectors.find(
+            (c) => c.connectorType === 'binance',
+        );
 
+        if (!connectorConfig) {
+            this.logger.error('❌ Binance connector not found in configuration');
+            throw new InternalServerErrorException('Binance connector not found in configuration');
+        }
+
+        const connectorKey = connectorConfig.key ?? process.env.BINANCE_API_KEY;
+        const connectorSecret = connectorConfig.secret ?? process.env.BINANCE_API_SECRET;
+
+        if (!connectorKey || !connectorSecret) {
+            this.logger.error('❌ Binance API credentials missing in config or environment');
+            throw new InternalServerErrorException('Binance API credentials missing');
+        }
+
+        this.logger.debug(`🔑 connectorKey (truncated): ${connectorKey.slice(0, 6)}...`);
+
+        /* === 🌐 3. Инициализация Binance API === */
         type BinanceTimeResponse = { serverTime: number };
 
         const fetchBinanceTime = async (): Promise<number> => {
             const res = await fetch('https://api.binance.com/api/v3/time');
             const { serverTime } = (await res.json()) as Partial<BinanceTimeResponse>;
-
             if (typeof serverTime !== 'number') {
                 throw new InternalServerErrorException('Invalid Binance time response');
             }
-
             return serverTime;
         };
 
-
-        if (securityConfig?.key && securityConfig?.secret) {
+        try {
             this.api = Binance({
-                apiKey: process.env.BINANCE_API_KEY,
-                apiSecret: process.env.BINANCE_API_SECRET,
-                getTime: fetchBinanceTime
+                apiKey: connectorKey,
+                apiSecret: connectorSecret,
+                getTime: fetchBinanceTime,
             });
-        } else {
-            this.logger.error('Binance API keys are not configured properly.');
-            throw new InternalServerErrorException('Binance API keys are missing in the configuration.');
-        }
-
-
-
-    }
-
-    async onModuleInit() {
-        this.logger.log(`ModuleInit`);
-
-        try {
-            await this.client.connect();
-            this.logger.log('Connected to Redis successfully!');
-        } catch (error: any) {
-            this.logger.error('Failed to connect to Redis:', error?.message || error);
-        }
-
-        try {
-            this.api?.time()
-                .then(time => {
-                    this.logger.log(
-                        "Binance time:",
-                        moment.utc(time).format('YYYY-MM-DD HH:mm:ss'),
-                        "Local time:",
-                        moment.utc(Date.now()).format('YYYY-MM-DD HH:mm:ss')
-                    );
-                })
-                .catch(err => {
-                    this.logger.error("Error fetching Binance time:", err?.message || err);
-                });
+            this.logger.log('✅ Binance API initialized successfully');
         } catch (err: any) {
-            this.logger.error("Unhandled error in onModuleInit:", err?.message || err);
+            this.logger.error('❌ Failed to initialize Binance API:', err?.message || err);
+            throw new InternalServerErrorException('Failed to initialize Binance API');
         }
+
+        /* === 🕒 4. Проверка соединения с Binance === */
+        try {
+            const time = await this.api.time();
+            this.logger.log(
+                `🕒 Binance time: ${moment.utc(time).format('YYYY-MM-DD HH:mm:ss')}, Local: ${moment
+                    .utc(Date.now())
+                    .format('YYYY-MM-DD HH:mm:ss')}`,
+            );
+        } catch (err: any) {
+            this.logger.warn('⚠️ Unable to fetch Binance time:', err?.message || err);
+        }
+
+        this.logger.log('✅ BinanceService ModuleInit complete');
     }
 
 
@@ -229,7 +239,12 @@ export class BinanceService implements OnModuleInit, DataSource {
         let result: { [index: string]: { value: number, moment: number } } = {}
 
         let exchangePrices: { [index: string]: string } = {}
-        let exchangeTime: number
+        let exchangeTime: number = Date.now();
+
+        if (!this.api) {
+            this.logger.warn('[BinanceService] API not initialized, returning empty prices');
+            return result;
+        }
 
 
         switch (marketType) {
@@ -282,6 +297,11 @@ export class BinanceService implements OnModuleInit, DataSource {
             assets: [],
             positions: []
         };
+
+        if (!this.api) {
+            this.logger.warn('[BinanceService] API not initialized, returning empty prices');
+            return result;
+        }
 
 
         switch (marketType) {
@@ -345,7 +365,12 @@ export class BinanceService implements OnModuleInit, DataSource {
      */
     async getSymbolsInfo(connectorType: ConnectorType, marketType: MarketType): Promise<Symbol[]> {
 
-        const resultSymbols: Symbol[] = [];
+        const result: Symbol[] = [];
+
+        if (!this.api) {
+            this.logger.warn('[BinanceService] API not initialized, returning empty prices');
+            return result;
+        }
 
         if (connectorType === ConnectorType.binance) {
             try {
@@ -353,7 +378,7 @@ export class BinanceService implements OnModuleInit, DataSource {
                     // Получение информации о спотовых рынках
                     const exchangeInfo = await this.api?.exchangeInfo();
                     exchangeInfo.symbols.forEach((item) => {
-                        resultSymbols.push({
+                        result.push({
                             name: item.symbol,
                             baseAsset: item.baseAsset,
                             quoteAsset: item.quoteAsset,
@@ -373,7 +398,7 @@ export class BinanceService implements OnModuleInit, DataSource {
                 } else if (marketType === MarketType.futures) {
                     const exchangeInfo = await this.api?.futuresExchangeInfo();
                     exchangeInfo.symbols.forEach((item) => {
-                        resultSymbols.push({
+                        result.push({
                             name: item.symbol, // <-- исправлено
                             baseAsset: item.baseAsset,
                             quoteAsset: item.quoteAsset,
@@ -413,7 +438,7 @@ export class BinanceService implements OnModuleInit, DataSource {
                     });
 
                     response.data.forEach((item: any) => {
-                        resultSymbols.push({
+                        result.push({
                             name: `${item.baseAsset}${item.quoteAsset}`,
                             baseAsset: item.baseAsset,
                             quoteAsset: item.quoteAsset,
@@ -433,7 +458,7 @@ export class BinanceService implements OnModuleInit, DataSource {
             }
         }
 
-        return resultSymbols;
+        return result;
     }
 
 
@@ -446,7 +471,7 @@ export class BinanceService implements OnModuleInit, DataSource {
 
         const currency = 'USDT'
 
-        let account: Account = {
+        let result: Account = {
             connectorType: this.connectorType,
             marketType,
             assets: [],
@@ -455,6 +480,11 @@ export class BinanceService implements OnModuleInit, DataSource {
             symbols: [],
             isActive: false,
         };
+
+        if (!this.api) {
+            this.logger.warn('[BinanceService] API not initialized, returning empty prices');
+            return result;
+        }
 
 
         let startIncomeTime = Number(moment.utc(moment().utc()).add(-1, 'days').format('x'))
@@ -471,7 +501,7 @@ export class BinanceService implements OnModuleInit, DataSource {
 
 
                 accountInfoSpot?.forEach(element => {
-                    account.assets.push({
+                    result.assets.push({
                         connectorType: this.connectorType,
                         marketType,
                         symbol: { name: element.asset },
@@ -483,7 +513,7 @@ export class BinanceService implements OnModuleInit, DataSource {
 
                 });
 
-                account.dailyProfit = {
+                result.dailyProfit = {
                     value: 0,
                     startTime: startIncomeTime,
                     endTime: endIncomeTime,
@@ -497,7 +527,7 @@ export class BinanceService implements OnModuleInit, DataSource {
                 const accountInfoFutures = await this.api?.futuresAccountInfo();
                 const accountInfoFutures_Assets = accountInfoFutures?.assets.filter(q => Number(q.walletBalance) != 0 && Number(q.availableBalance) != 0);
                 accountInfoFutures_Assets?.forEach(element => {
-                    account.assets.push({
+                    result.assets.push({
                         connectorType: this.connectorType,
                         marketType,
                         symbol: { name: element.asset },
@@ -510,9 +540,9 @@ export class BinanceService implements OnModuleInit, DataSource {
                 const accountInfoFutures_Positions = accountInfoFutures?.positions.filter(q => parseFloat(q.positionAmt) != 0);
                 accountInfoFutures_Positions?.forEach(element => {
 
-                    if (!account.symbols.find((q: { name: string; }) => q.name == element.symbol)) account.symbols.push({ name: element.symbol });
+                    if (!result.symbols.find((q: { name: string; }) => q.name == element.symbol)) result.symbols.push({ name: element.symbol });
 
-                    account.positions.push({
+                    result.positions.push({
                         connectorType: this.connectorType,
                         marketType,
                         symbol: { name: element.symbol },
@@ -526,7 +556,7 @@ export class BinanceService implements OnModuleInit, DataSource {
 
                 });
 
-                const filterAssets = account.assets.filter((q: { symbol: { name: string; }; }) => q.symbol.name != currency)
+                const filterAssets = result.assets.filter((q: { symbol: { name: string; }; }) => q.symbol.name != currency)
 
                 for (let i = 0; i < filterAssets.length; i++) {
                     const asset = filterAssets[i];
@@ -553,7 +583,7 @@ export class BinanceService implements OnModuleInit, DataSource {
                             throw new InternalServerErrorException('Missing provider configuration');
                         }
 
-                        return account.orders.push({
+                        return result.orders.push({
                             symbol: { name: order.symbol },
                             side,
                             type,
@@ -605,7 +635,7 @@ export class BinanceService implements OnModuleInit, DataSource {
                     })
                 });
 
-                account.dailyProfit = {
+                result.dailyProfit = {
                     value: income,
                     startTime: startIncomeTime,
                     endTime: endIncomeTime,
@@ -614,14 +644,27 @@ export class BinanceService implements OnModuleInit, DataSource {
 
                 break;
         }
-        if (account.assets.length > 0) account.isActive = true
+        if (result.assets.length > 0) result.isActive = true
 
-        return account
+        return result
     }
 
     async changeLeverage(symbol: Symbol, newLeverage: number): Promise<Symbol> {
-        const result = await this.api?.futuresLeverage({ symbol: symbol.name, leverage: newLeverage })
-        return { name: result.symbol, leverage: result.leverage };
+
+        const result: Symbol = {
+            name: symbol.name
+        };
+
+        if (!this.api) {
+            this.logger.warn('[BinanceService] API not initialized, returning empty prices');
+            return result;
+        }
+
+        const futuresLeverage = await this.api?.futuresLeverage({ symbol: symbol.name, leverage: newLeverage })
+
+        result.leverage = futuresLeverage.leverage
+
+        return result;
     }
 
     /**
@@ -630,6 +673,14 @@ export class BinanceService implements OnModuleInit, DataSource {
      * @returns A Promise resolving to the placed order with updated details.
      */
     async openOrder(order: Order): Promise<Order> {
+
+        const result: Order = { ...order };
+
+        if (!this.api) {
+            this.logger.warn('[BinanceService] API not initialized, returning empty prices');
+            return result;
+        }
+
 
         if (!order.useSandbox) {
             switch (order.marketType) {
@@ -689,8 +740,8 @@ export class BinanceService implements OnModuleInit, DataSource {
 
 
                     const spotOrderEntity = await this.api?.order(spotOrderToProvider)
-                    order.externalId = spotOrderEntity.orderId.toString()
-                    order.updateTime = spotOrderEntity.updateTime
+                    result.externalId = spotOrderEntity.orderId.toString()
+                    result.updateTime = spotOrderEntity.updateTime
 
                     break;
                 case MarketType.futures:
@@ -792,14 +843,14 @@ export class BinanceService implements OnModuleInit, DataSource {
                     }
 
                     if (futuresOrderEntity) {
-                        order.externalId = futuresOrderEntity.orderId.toString()
-                        order.updateTime = futuresOrderEntity.updateTime
+                        result.externalId = futuresOrderEntity.orderId.toString()
+                        result.updateTime = futuresOrderEntity.updateTime
                     }
                     break;
             }
-
         }
-        return order;
+
+        return result;
     }
 
 
@@ -810,6 +861,15 @@ export class BinanceService implements OnModuleInit, DataSource {
      * @returns A Promise resolving to the closed order.
      */
     async closeOrder(options: { id: string, symbol: Symbol, marketType: MarketType }): Promise<Order> {
+
+
+        const result: Order = {} as Order;
+
+        if (!this.api) {
+            this.logger.warn('[BinanceService] API not initialized, returning empty prices');
+            return result;
+        }
+
 
         const { id, symbol, marketType } = options
 
@@ -824,28 +884,27 @@ export class BinanceService implements OnModuleInit, DataSource {
             throw new InternalServerErrorException('Provider config is missing');
         }
 
-        const order: Order = {
-            symbol: { name: element.symbol },
-            externalId: element.orderId.toString(),
-            side: element.side.toString() as OrderSide,
-            type: element.type.toString() as OrderType,
-            price: parseFloat(element.price),
-            quantity: parseFloat(element.origQty),
-            time: element.time,
-            updateTime: element.updateTime,
-            source: {
-                type: OrderSourceType.provider,
-                key: this.connectorType,
-                restApiUrl: provider.restApiUrl,
-            },
-            useSandbox: false,
-            marketType,
-            connectorType: this.connectorType,
-        };
+        result.symbol = { name: element.symbol }
+        result.externalId = element.orderId.toString()
+        result.side = element.side.toString() as OrderSide
+        result.type = element.type.toString() as OrderType
+        result.price = parseFloat(element.price)
+        result.quantity = parseFloat(element.origQty)
+        result.time = element.time
+        result.updateTime = element.updateTime
+        result.source = {
+            type: OrderSourceType.provider,
+            key: this.connectorType,
+            restApiUrl: provider.restApiUrl,
+        },
+            result.useSandbox = false
+        result.marketType = marketType
+        result.connectorType = this.connectorType
+
 
         if (element) await this.api?.futuresCancelOrder({ orderId: +id, symbol: symbol.name })
 
-        return order
+        return result
     }
 
     /**
@@ -874,6 +933,11 @@ export class BinanceService implements OnModuleInit, DataSource {
     public async getOpenOrders(options: { symbol?: Symbol, marketType: MarketType }): Promise<Order[]> {
 
         let result: Order[] = []
+
+        if (!this.api) {
+            this.logger.warn('[BinanceService] API not initialized, returning empty prices');
+            return result;
+        }
 
         const { symbol, marketType } = options
 
@@ -1443,7 +1507,7 @@ export class BinanceService implements OnModuleInit, DataSource {
                 updatedAt: new Date(),
             }))
         );
-        
+
         await this.symbolRepository.save(savedSymbols);
 
         this.logger.log(
@@ -1690,6 +1754,11 @@ export class BinanceService implements OnModuleInit, DataSource {
 
         const method = (marketType === MarketType.futures) ? 'futuresCandles' : 'candles';
 
+        if (!this.api || !this.api.ws) {
+            this.logger.warn(`[BinanceService] API not initialized, cannot subscribeToOrderBook`);
+            return () => { };
+        }
+
         const unsubscribe = this.api?.ws[method](
             symbols.map(s => s.name),
             this.convertTimeFrame(interval), // <-- тут валится
@@ -1709,6 +1778,12 @@ export class BinanceService implements OnModuleInit, DataSource {
     public async subscribeToOrderBook(options: { marketType: MarketType, symbols: Symbol[] }, handler: OrderBookHandler) {
         const { marketType, symbols } = options
         const method = marketType === MarketType.futures ? 'futuresDepth' : 'depth';
+
+        if (!this.api || !this.api.ws) {
+            this.logger.warn(`[BinanceService] API not initialized, cannot subscribeToOrderBook`);
+            return () => { };
+        }
+
         const unsubscribe = this.api?.ws[method](symbols.map(s => s.name), this.orderBookAdapter(marketType, handler));
 
         return () => {
@@ -1723,6 +1798,12 @@ export class BinanceService implements OnModuleInit, DataSource {
     public async subscribeToAccount(options: { marketType: MarketType }, handler: AccountEventHandler) {
         const { marketType } = options
         const method = marketType === MarketType.futures ? 'futuresUser' : 'user';
+
+        if (!this.api || !this.api.ws) {
+            this.logger.warn(`[BinanceService] API not initialized, cannot subscribeToOrderBook`);
+            return () => { };
+        }
+
         const unsubscribe = await this.api?.ws[method](this.accountAdapter(marketType, handler));
 
         return () => {
@@ -1737,6 +1818,12 @@ export class BinanceService implements OnModuleInit, DataSource {
     public async subscribeToTrade(options: { marketType: MarketType, symbols: Symbol[] }, handler: TradeHandler) {
         const { marketType, symbols } = options
         const method = marketType === MarketType.futures ? 'futuresAggTrades' : 'aggTrades';
+
+        if (!this.api || !this.api.ws) {
+            this.logger.warn(`[BinanceService] API not initialized, cannot subscribeToOrderBook`);
+            return () => { };
+        }
+
         const unsubscribe = this.api?.ws[method](symbols.map(s => s.name), this.tradeAdapter(marketType, handler));
 
         return () => {

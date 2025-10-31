@@ -26,7 +26,8 @@ import Binance, {
     AccountConfigUpdate,
     UserDataStreamEvent,
     TakeProfitMarketNewFuturesOrder,
-    StopMarketNewFuturesOrder
+    StopMarketNewFuturesOrder,
+    Binance as BinanceClient
 } from 'binance-api-node';
 import { ClientProxy } from '@nestjs/microservices';
 import {
@@ -85,9 +86,9 @@ export class TestnetBinanceFuturesService implements OnModuleInit, DataSource {
 
 
 
-    private readonly api: ReturnType<typeof Binance>;
+    private api?: BinanceClient;
     private assets: Map<string, Asset> = new Map();
-    private info: ExchangeInfo;
+    // private info: ExchangeInfo;
     // private futuresInfo: ExchangeInfo<FuturesOrderType_LT>;
     private hedgeMode = false;
 
@@ -95,7 +96,7 @@ export class TestnetBinanceFuturesService implements OnModuleInit, DataSource {
     /////////.... from tradingSystem
 
 
-    private marketTick: Candle;
+    // private marketTick: Candle;
     protected candles: Candle[] = [];
 
     get currentCandle() {
@@ -178,6 +179,10 @@ export class TestnetBinanceFuturesService implements OnModuleInit, DataSource {
         let exchangePrices: { [index: string]: string } = {}
         let exchangeTime: number
 
+        if (!this.api) {
+            this.logger.warn('[BinanceService] API not initialized, returning empty prices');
+            return result;
+        }
 
         switch (marketType) {
             case MarketType.spot:
@@ -210,6 +215,10 @@ export class TestnetBinanceFuturesService implements OnModuleInit, DataSource {
             positions: []
         };
 
+        if (!this.api) {
+            this.logger.warn('[BinanceService] API not initialized, returning empty prices');
+            return result;
+        }
 
         switch (marketType) {
             case MarketType.spot:
@@ -283,6 +292,11 @@ export class TestnetBinanceFuturesService implements OnModuleInit, DataSource {
             symbols: [],
             isActive: false
         };
+
+        if (!this.api) {
+            this.logger.warn('[BinanceService] API not initialized, returning empty prices');
+            return account;
+        }
 
         switch (marketType) {
 
@@ -382,11 +396,22 @@ export class TestnetBinanceFuturesService implements OnModuleInit, DataSource {
     }
 
     async changeLeverage(symbol: Symbol, newLeverage: number): Promise<Symbol> {
+
+        if (!this.api) {
+            this.logger.warn('[BinanceService] API not initialized, returning empty prices');
+            return { name: symbol.name, leverage: 0 };
+        }
+
         const result = await this.api?.futuresLeverage({ symbol: symbol.name, leverage: newLeverage })
         return { name: result.symbol, leverage: result.leverage };
     }
 
     async openOrder(order: Order): Promise<Order> {
+
+        if (!this.api) {
+            this.logger.warn('[BinanceService] API not initialized, returning empty prices');
+            return order;
+        }
 
         if (!order.useSandbox) {
             switch (order.marketType) {
@@ -568,8 +593,12 @@ export class TestnetBinanceFuturesService implements OnModuleInit, DataSource {
 
         const { id, symbol, marketType } = options
 
-        const orders = await this.api?.futuresOpenOrders({ symbol: symbol.name });
+        if (!this.api) {
+            this.logger.warn('[BinanceService] API not initialized, returning empty prices');
+            return {} as Order;
+        }
 
+        const orders = await this.api?.futuresOpenOrders({ symbol: symbol.name });
 
         const element = orders.find(q => q.orderId == id)
 
@@ -623,6 +652,11 @@ export class TestnetBinanceFuturesService implements OnModuleInit, DataSource {
     public async getOpenOrders(options: { symbol?: Symbol, marketType: MarketType }): Promise<Order[]> {
 
         let result: Order[] = []
+
+        if (!this.api) {
+            this.logger.warn('[BinanceService] API not initialized, returning empty prices');
+            return result;
+        }
 
         const { symbol, marketType } = options
 
@@ -877,6 +911,11 @@ export class TestnetBinanceFuturesService implements OnModuleInit, DataSource {
         const { marketType, symbols, interval } = options
         const method = (marketType === MarketType.futures) ? 'futuresCandles' : 'candles';
 
+        if (!this.api || !this.api.ws) {
+            this.logger.warn(`[BinanceService] API not initialized, cannot subscribeToOrderBook`);
+            return () => { };
+        }
+
         const unsubscribe = this.api?.ws[method](
             symbols.map(s => s.name),
             this.convertTimeFrame(interval),
@@ -895,7 +934,14 @@ export class TestnetBinanceFuturesService implements OnModuleInit, DataSource {
     public async subscribeToOrderBook(options: { marketType: MarketType, symbols: Symbol[] }, handler: OrderBookHandler) {
         const { marketType, symbols } = options
         console.log("subscribeToOrderBook:", { marketType, symbols });
+
+
         const method = marketType === MarketType.futures ? 'futuresDepth' : 'depth';
+
+        if (!this.api || !this.api.ws) {
+            this.logger.warn(`[BinanceService] API not initialized, cannot subscribeToOrderBook`);
+            return () => { };
+        }
         const unsubscribe = this.api?.ws[method](symbols.map(s => s.name), this.orderBookAdapter(marketType, handler));
 
         return () => {
@@ -910,6 +956,11 @@ export class TestnetBinanceFuturesService implements OnModuleInit, DataSource {
     public async subscribeToAccount(options: { marketType: MarketType }, handler: AccountEventHandler) {
         const { marketType } = options
         const method = marketType === MarketType.futures ? 'futuresUser' : 'user';
+
+        if (!this.api || !this.api.ws) {
+            this.logger.warn(`[BinanceService] API not initialized, cannot subscribeToOrderBook`);
+            return () => { };
+        }
 
         this.api?.ws.trades(['BTCUSDT'], trade => console.log("Number(trade.price):", Number(trade.price)))
 
@@ -929,6 +980,11 @@ export class TestnetBinanceFuturesService implements OnModuleInit, DataSource {
 
         const { marketType, symbols } = options
         const method = 'aggTrades';
+
+        if (!this.api || !this.api.ws) {
+            this.logger.warn(`[BinanceService] API not initialized, cannot subscribeToOrderBook`);
+            return () => { };
+        }
 
         const unsubscribe = this.api?.ws[method](symbols.map(s => s.name), this.tradeAdapter(marketType, handler));
 

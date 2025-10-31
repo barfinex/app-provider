@@ -1,6 +1,6 @@
 import { ConflictException, ForbiddenException, Inject, Injectable, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DeepPartial, Repository } from 'typeorm';
 import { HttpService } from '@nestjs/axios';
 import { catchError, map, lastValueFrom } from 'rxjs';
 import { DetectorEntity } from './detector.entity';
@@ -69,19 +69,24 @@ export class DetectorService {
     }
 
 
-    async updateDetectorByKey(key: string, update: Partial<Detector>): Promise<Detector | null> {
+    async updateDetectorByKey(
+        key: string,
+        update: Partial<Detector>,
+    ): Promise<DetectorEntity | null> {
         const entity = await this.detectorRepository.findOneBy({ key });
-
         if (!entity) return null;
 
-        const updatedOptions = { ...entity.options, ...update };
+        const updatedOptions: Detector = {
+            ...entity.options,
+            ...update,
+        };
 
-        await this.detectorRepository.update({ key }, {
-            options: updatedOptions,
-            name: updatedOptions.sysname || entity.name,
-        });
+        entity.options = updatedOptions;
+        entity.name = updatedOptions.sysname ?? entity.name;
 
-        return updatedOptions;
+        await this.detectorRepository.save(entity);
+
+        return entity;
     }
 
 
@@ -388,13 +393,13 @@ export class DetectorService {
     }
 
 
-    async update(name: string, options: Detector): Promise<any> {
+    async update(name: string, options: Detector): Promise<DetectorEntity | null> {
+        const detector = await this.detectorRepository.findOne({ where: { name } });
+        if (!detector) return null;
 
-        let detector = await this.detectorRepository.findOne({ where: { name } });
-        if (detector) {
-            detector.options = options
-            await this.detectorRepository.update(detector.id, detector);
-        }
+        detector.options = options;
+        await this.detectorRepository.save(detector);
+
         return detector;
     }
 

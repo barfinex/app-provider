@@ -5,13 +5,13 @@ import { Column, Entity, ObjectId, ObjectIdColumn, UpdateDateColumn, CreateDateC
 export class InspectorEntity {
 
     @ObjectIdColumn()
-    id: ObjectId;
+    id!: ObjectId;
 
     @Column()
-    name: string;
+    name!: string;
 
     @Column()
-    options: Inspector;
+    options!: Inspector;
 
     @Column('timestampz')
     @CreateDateColumn()

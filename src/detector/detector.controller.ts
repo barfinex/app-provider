@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Post, Put } from '@nestjs/common';
+import { Body, Controller, Delete, Get, InternalServerErrorException, Post, Put } from '@nestjs/common';
 import { Param, Query } from '@nestjs/common/decorators/http/route-params.decorator';
 import { DetectorService } from './detector.service';
 import { ConnectorService } from '../connector/connector.service';
@@ -18,9 +18,13 @@ export class DetectorController {
 
     @Get()
     async getAll() {
-        // console.log('getAllDetectorsByProviderKey', this.connectorService.key);
-        return this.detectorService.getAllDetectorsByProviderKey(this.connectorService.key);
-        // return this.detectorService.getAllDetectors();
+        const key = this.connectorService.key;
+
+        if (!key) {
+            throw new InternalServerErrorException('Provider key not initialized yet');
+        }
+
+        return this.detectorService.getAllDetectorsByProviderKey(key);
     }
 
     @Get(':key')

@@ -6,17 +6,17 @@ import { Column, Entity, ObjectId, ObjectIdColumn, UpdateDateColumn, CreateDateC
 export class DetectorEntity {
 
     @ObjectIdColumn()
-    id: ObjectId;
+    id!: ObjectId;
 
     @Column()
-    key: string;
+    key!: string;
 
     @Column()
-    name: string;
+    name!: string;
 
     @Column({ type: 'json' })
     @Type(() => Object)
-    options: Detector;
+    options!: Detector;
 
     @CreateDateColumn({ type: 'timestamptz' })
     created!: Date;

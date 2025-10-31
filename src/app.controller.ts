@@ -1,4 +1,4 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, InternalServerErrorException } from '@nestjs/common';
 import { ConnectorService } from './connector/connector.service';
 import { ApiTags } from '@nestjs/swagger';
 import { Provider } from '@barfinex/types';
@@ -6,29 +6,26 @@ import { Provider } from '@barfinex/types';
 @ApiTags('Options')
 @Controller('options')
 export class AppController {
-    constructor(
-        private connectorService: ConnectorService
-    ) { }
+    constructor(private readonly connectorService: ConnectorService) { }
 
     @Get()
     async key(): Promise<Provider> {
+        const key = this.connectorService.key;
+
+        if (!key) {
+            throw new InternalServerErrorException('Provider key not initialized yet');
+        }
+
         const connectors = this.connectorService.getAllConnectors();
         const detectors = this.connectorService.getAllDetectors();
         const accounts = this.connectorService.getAllAccounts();
 
         const provider: Provider = {
-            key: this.connectorService.key,
-            // restApiUrl: null,
-            // restApiToken: process.env.PROVIDER_API_TOKEN,
-            // restApiUrl: '',
-            // key: null,
-            // restApiToken: null,
+            key,
             connectors,
             detectors,
             accounts,
-
             isAvailable: true,
-
             studioGuid: '',
             studioName: '',
             studioDescription: '',
