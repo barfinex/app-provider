@@ -26,8 +26,14 @@ RUN if [ -f package-lock.json ]; then \
 # # 🏗️ Компиляция TypeScript
 # RUN npx tsc -p /usr/src/monorepo/apps/provider/tsconfig.json
 # 🏗️ Компиляция TypeScript (все библиотеки + provider)
+
+# 🏗️ Компиляция TypeScript (все библиотеки + provider)
+WORKDIR /usr/src/monorepo
 RUN npx tsc -b libs/types libs/utils libs/key libs/config libs/plugin-driver libs/connectors libs/orders libs/provider-ws-bridge libs/telegram libs/detector \
     && npx tsc -b apps/provider
+
+# RUN npx tsc -b libs/types libs/utils libs/key libs/config libs/plugin-driver libs/connectors libs/orders libs/provider-ws-bridge libs/telegram libs/detector \
+#     && npx tsc -b apps/provider
 
 # ───────────────────────────────
 # Stage 2: Runtime
