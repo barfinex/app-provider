@@ -274,37 +274,34 @@ export class OrderService {
     }
 
     private orderToOrderEntity(order: Order): OrderEntity {
-
         console.log("order:", order);
-        
-        let result: OrderEntity = {
-            id: (order.id) ? new ObjectId(order.id) : new ObjectId(),
-            externalId: (order.externalId) ? order.externalId : null,
+
+        const result: OrderEntity = {
+            id: order.id ? new ObjectId(order.id) : new ObjectId(),
+            externalId: order.externalId ?? null,
             connectorType: order.connectorType.toString(),
             marketType: order.marketType.toString(),
-            symbol: (order.symbol) ? order.symbol.name : '',
+            symbol: order.symbol?.name ?? '',
             side: order.side?.toString() ?? null,
             type: order.type?.toString() ?? null,
             price: order.price ?? null,
             sourceSysname: order.source.key,
             sourceType: order.source.type,
-            sourceBaseApiUrl: (order.source.restApiUrl) ? order.source.restApiUrl : '',
-            time: (order.time) ? +order.time : moment.utc(new Date()).unix(),
-            updateTime: (order.updateTime) ? order.updateTime : null,
-            quantity: (order.quantity) ? order.quantity : null,
-            quantityExecuted: (order.quantityExecuted) ? order.quantityExecuted : null,
-            // priceStop: (order.priceStop) ? order.priceStop : null,
-            // isClose: (order.isClose) ? order.isClose : false,
-            useSandbox: (order.useSandbox) ? order.useSandbox : true,
-            priceClose: (order.priceClose) ? order.priceClose : null
-        }
+            sourceBaseApiUrl: order.source.restApiUrl ?? '',
+            time: order.time ? +order.time : moment.utc(new Date()).unix(),
+            updateTime: order.updateTime ?? null,
+            quantity: order.quantity ?? null,
+            quantityExecuted: order.quantityExecuted ?? null,
+            priceClose: order.priceClose ?? null,
+            useSandbox: order.useSandbox ?? true,
+            closeTime: order.closeTime ?? null, // ✅ добавлено
+        };
 
-        return result
+        return result;
     }
 
     private orderEntityToOrder(orderEntity: OrderEntity): Order {
-
-        let result: Order = {
+        return {
             symbol: { name: orderEntity.symbol },
             id: orderEntity.id.toString(),
             externalId: orderEntity.externalId,
@@ -314,7 +311,7 @@ export class OrderService {
             source: {
                 key: orderEntity.sourceSysname,
                 type: orderEntity.sourceType as OrderSourceType,
-                restApiUrl: orderEntity.sourceBaseApiUrl
+                restApiUrl: orderEntity.sourceBaseApiUrl,
             },
             time: orderEntity.time,
             updateTime: orderEntity.updateTime,
@@ -323,11 +320,12 @@ export class OrderService {
             priceClose: orderEntity.priceClose,
             useSandbox: orderEntity.useSandbox,
             connectorType: orderEntity.connectorType as ConnectorType,
-            marketType: orderEntity.marketType as MarketType
-        }
-
-        return result
+            marketType: orderEntity.marketType as MarketType,
+            closeTime: (orderEntity.closeTime ?? null) as null,
+        };
     }
+
+
 
 
 }

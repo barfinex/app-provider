@@ -333,7 +333,8 @@ export class TestnetBinanceSpotService implements OnModuleInit, DataSource {
                                 key: this.connectorType,
                                 type: OrderSourceType.provider,
                                 restApiUrl: null
-                            }
+                            },
+                            closeTime: null
                         });
                     });
                 }
@@ -555,7 +556,8 @@ export class TestnetBinanceSpotService implements OnModuleInit, DataSource {
         if (orders.find(q => q.orderId == id)) await this.api.futuresCancelOrder({ orderId: +id, symbol: symbol.name })
 
         return {
-            externalId: id, symbol, side: OrderSide.BUY, type: OrderType.MARKET, price: 0, quantity: 0, time: Date.now(), updateTime: Date.now(), useSandbox: false, connectorType: this.connectorType, marketType, source: { key: this.connectorType, type: OrderSourceType.provider, restApiUrl: null }
+            externalId: id, symbol, side: OrderSide.BUY, type: OrderType.MARKET, price: 0, quantity: 0, time: Date.now(), updateTime: Date.now(), useSandbox: false, connectorType: this.connectorType, marketType, source: { key: this.connectorType, type: OrderSourceType.provider, restApiUrl: null },
+            closeTime: null
         }
     }
 
@@ -620,8 +622,8 @@ export class TestnetBinanceSpotService implements OnModuleInit, DataSource {
                         key: this.connectorType,
                         type: OrderSourceType.provider,
                         restApiUrl: null
-
-                    }
+                    },
+                    closeTime: null
                 }
 
                 result.push(order);
@@ -663,8 +665,8 @@ export class TestnetBinanceSpotService implements OnModuleInit, DataSource {
                         key: this.connectorType,
                         type: OrderSourceType.provider,
                         restApiUrl: null
-
-                    }
+                    },
+                    closeTime: null
                 });
             });
 

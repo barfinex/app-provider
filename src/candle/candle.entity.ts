@@ -4,20 +4,20 @@ import { CandleMetadataEntity } from './candleMetadata.entity';
 @Entity()
 export class CandleEntity {
     @ObjectIdColumn()
-    id: ObjectId;
+    id!: ObjectId;
 
     @Column()
-    o: number;
+    o!: number;
     @Column()
-    c: number;
+    c!: number;
     @Column()
-    h: number;
+    h!: number;
     @Column()
-    l: number;
+    l!: number;
     @Column()
-    v: number;
+    v!: number;
     @Column()
-    time: number;
+    time!: number;
 
 
     @ManyToOne(type => CandleMetadataEntity, candleMetadata => candleMetadata.candles, {
@@ -25,6 +25,6 @@ export class CandleEntity {
         onDelete: 'CASCADE',
         onUpdate: 'CASCADE',
     })
-    candleMetadata: CandleMetadataEntity;
+    candleMetadata!: CandleMetadataEntity;
 
 }

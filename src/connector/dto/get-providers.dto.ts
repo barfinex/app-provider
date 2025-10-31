@@ -4,7 +4,7 @@ import { Paginator } from '../../common/dto/paginator.dto';
 import { ConnectorType, ProviderInfo } from '@barfinex/types';
 
 export class ProviderPaginator extends Paginator<ProviderInfo> {
-    data: ProviderInfo[];
+    data!: ProviderInfo[];
 }
 
 export class GetProvidersDto extends PaginationArgs {

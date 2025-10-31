@@ -565,6 +565,7 @@ export class ConnectorService {
             connectorType,
             marketType,
             source,
+            closeTime: null
         };
 
         switch (connectorType) {

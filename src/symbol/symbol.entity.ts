@@ -1,31 +1,38 @@
-import { Entity, Column, CreateDateColumn, UpdateDateColumn, ObjectIdColumn } from 'typeorm';
+import {
+    Entity,
+    Column,
+    CreateDateColumn,
+    UpdateDateColumn,
+    ObjectIdColumn,
+    ObjectId,
+} from 'typeorm';
 
 @Entity()
 export class SymbolEntity {
     @ObjectIdColumn()
-    id: number;
+    id!: ObjectId; // ✅ Исправлено: ObjectId вместо number
 
     @Column()
-    baseAsset: string;
+    baseAsset!: string;
 
     @Column()
-    quoteAsset: string;
+    quoteAsset!: string;
 
     @Column()
-    symbol: string;
+    symbol!: string;
 
     @Column()
-    status: string;
+    status!: string;
 
     @Column()
-    connectorType: string;
+    connectorType!: string;
 
     @Column()
-    marketType: string;
+    marketType!: string;
 
     @UpdateDateColumn()
-    updatedAt: Date;
+    updatedAt!: Date;
 
     @CreateDateColumn()
-    createdAt: Date;
+    createdAt!: Date;
 }

@@ -2,63 +2,60 @@ import { Column, Entity, Index, ObjectIdColumn, ObjectId } from "typeorm";
 
 @Entity()
 export class OrderEntity {
-
     @ObjectIdColumn()
-    id: ObjectId;
+    id!: ObjectId;
 
     @Column({ nullable: true })
-    externalId: string | null;
+    externalId!: string | null;
 
     @Column()
-    connectorType: string
+    connectorType!: string;
 
     @Column()
-    marketType: string
+    marketType!: string;
 
     @Index()
     @Column()
-    sourceSysname: string
+    sourceSysname!: string;
 
     @Index()
     @Column()
-    sourceType: string
+    sourceType!: string;
 
     @Index()
     @Column()
-    sourceBaseApiUrl: string
+    sourceBaseApiUrl!: string;
 
     @Column()
-    symbol: string
+    symbol!: string;
 
     @Column({ nullable: true })
-    side: string | null
+    side!: string | null;
 
     @Column({ nullable: true })
-    type: string | null
+    type!: string | null;
 
     @Column({ type: 'decimal', nullable: true })
-    price: number | null
+    price!: number | null;
 
     @Column({ type: 'bigint' })
-    time: number
+    time!: number;
 
     @Column({ type: 'bigint', nullable: true })
-    updateTime: number | null
+    updateTime!: number | null;
 
     @Column({ type: 'decimal', nullable: true })
-    quantity: number | null
+    quantity!: number | null;
 
     @Column({ type: 'decimal', nullable: true })
-    quantityExecuted: number | null
-
+    quantityExecuted!: number | null;
 
     @Column({ type: 'decimal', nullable: true })
-    priceClose: number | null
+    priceClose!: number | null;
 
     @Column()
-    useSandbox: boolean
+    useSandbox!: boolean;
 
     @Column({ type: 'bigint', nullable: true })
-    closeTime?: number
+    closeTime!: number | null;
 }
-

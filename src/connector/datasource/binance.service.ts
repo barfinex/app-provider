@@ -599,6 +599,7 @@ export class BinanceService implements OnModuleInit, DataSource {
                                 key: this.connectorType,
                                 restApiUrl: provider.restApiUrl,
                             },
+                            closeTime: null
                         });
                     });
 
@@ -972,6 +973,7 @@ export class BinanceService implements OnModuleInit, DataSource {
                     useSandbox: false,
                     marketType,
                     connectorType: this.connectorType,
+                    closeTime: null
                 };
 
 
@@ -1014,6 +1016,7 @@ export class BinanceService implements OnModuleInit, DataSource {
                         key: this.connectorType,
                         restApiUrl: provider.restApiUrl,
                     },
+                    closeTime: null
                 });
 
             });

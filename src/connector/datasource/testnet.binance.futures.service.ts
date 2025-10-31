@@ -382,7 +382,8 @@ export class TestnetBinanceFuturesService implements OnModuleInit, DataSource {
                                     key: this.connectorType,
                                     type: OrderSourceType.provider,
                                     restApiUrl: null
-                                }
+                                },
+                                closeTime: null
                             });
                         });
                     }
@@ -622,7 +623,8 @@ export class TestnetBinanceFuturesService implements OnModuleInit, DataSource {
             },
             useSandbox: false,
             marketType,
-            connectorType: ConnectorType.binance
+            connectorType: ConnectorType.binance,
+            closeTime: null
         }
 
 
@@ -687,7 +689,8 @@ export class TestnetBinanceFuturesService implements OnModuleInit, DataSource {
                     },
                     useSandbox: false,
                     connectorType: this.connectorType,
-                    marketType: marketType
+                    marketType: marketType,
+                    closeTime: null
                 }
 
                 result.push(order);
@@ -728,8 +731,8 @@ export class TestnetBinanceFuturesService implements OnModuleInit, DataSource {
                         key: this.connectorType,
                         type: OrderSourceType.provider,
                         restApiUrl: null
-                    }
-
+                    },
+                    closeTime: null
                 });
             });
 
