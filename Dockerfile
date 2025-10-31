@@ -32,7 +32,7 @@ WORKDIR /usr/src/app
 ENV NODE_ENV=production
 
 # 📦 Копируем артефакты сборки и package.json
-COPY --from=builder /usr/src/monorepo/dist/apps/provider ./dist
+COPY --from=builder /usr/src/monorepo/apps/provider/dist ./dist
 COPY --from=builder /usr/src/monorepo/apps/provider/package*.json ./
 
 # 🧹 Устанавливаем только прод-зависимости

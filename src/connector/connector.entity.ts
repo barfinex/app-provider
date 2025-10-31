@@ -4,12 +4,13 @@ import { Column, Entity, ObjectId, ObjectIdColumn, CreateDateColumn, UpdateDateC
 export class ConnectorEntity {
 
     @ObjectIdColumn()
-    id: ObjectId;
-    @Column()
-    connectorType: string;
+    id!: ObjectId;
 
     @Column()
-    options: string;
+    connectorType!: string;
+
+    @Column()
+    options!: string;
 
     @CreateDateColumn({ type: 'timestamptz' })
     created!: Date;
