@@ -29,8 +29,10 @@ RUN if [ -f package-lock.json ]; then \
 
 # 🏗️ Компиляция TypeScript (все библиотеки + provider)
 WORKDIR /usr/src/monorepo
-RUN npx tsc -b libs/types libs/utils libs/key libs/config libs/plugin-driver libs/connectors libs/orders libs/provider-ws-bridge libs/telegram libs/detector \
+RUN npm install --no-fund --no-audit --save-dev typescript \
+    && npx tsc -b libs/types libs/utils libs/key libs/config libs/plugin-driver libs/connectors libs/orders libs/provider-ws-bridge libs/telegram libs/detector \
     && npx tsc -b apps/provider
+
 
 # RUN npx tsc -b libs/types libs/utils libs/key libs/config libs/plugin-driver libs/connectors libs/orders libs/provider-ws-bridge libs/telegram libs/detector \
 #     && npx tsc -b apps/provider
