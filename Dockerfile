@@ -10,14 +10,14 @@ RUN apk add --no-cache bash coreutils git python3 make g++
 
 # 🧩 Копируем файлы монорепы
 COPY package*.json ./ 
-COPY tsconfig*.json ./
+COPY tsconfig*.json ./ 
 COPY libs ./libs
 COPY apps/provider ./apps/provider
 
-# ⚙️ Устанавливаем все зависимости (в корне)
+# ⚙️ Устанавливаем все зависимости
 RUN npm install --no-fund --no-audit
 
-# 🔧 Устанавливаем dev-зависимости для компиляции
+# 🔧 Устанавливаем dev-зависимости для сборки
 RUN npm install --no-fund --no-audit --save-dev typescript @types/node reflect-metadata
 
 # 🏗️ Компиляция TypeScript (все библиотеки + provider)
@@ -27,13 +27,13 @@ RUN npx tsc -b apps/provider
 # Stage 2: Runtime
 # ───────────────────────────────
 FROM node:20.11.1-alpine3.19 AS runtime
-WORKDIR /usr/src/app
 
+WORKDIR /usr/src/app
 ENV NODE_ENV=production
 
 # 📦 Копируем собранные артефакты
-# ВАЖНО: копируем именно dist/apps/provider, а не apps/provider/dist
-COPY --from=builder /usr/src/monorepo/dist/apps/provider ./dist
+# ⚠️ Важно: провайдер компилируется в apps/provider/dist, а не dist/apps/provider
+COPY --from=builder /usr/src/monorepo/apps/provider/dist ./dist
 COPY --from=builder /usr/src/monorepo/apps/provider/package*.json ./
 
 # 🧹 Устанавливаем только прод-зависимости
