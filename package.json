@@ -4,9 +4,9 @@
     "description": "Financial data and integration service for the Barfinex ecosystem. Provides connectors, WebSocket bridges, and unified market data feeds.",
     "author": "Barfinex",
     "license": "Apache-2.0",
-    "main": "dist/apps/provider/main.js",
+    "main": "dist/src/main.js",
     "scripts": {
-        "start:prod": "node dist/main.js"
+        "start:prod": "node dist/src/main.js"
     },
     "dependencies": {
         "@nestjs/common": "^10.3.4",

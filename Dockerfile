@@ -9,7 +9,7 @@ WORKDIR /usr/src/monorepo
 RUN apk add --no-cache bash coreutils git python3 make g++
 
 # 🧩 Копируем файлы монорепы
-COPY package*.json ./
+COPY package*.json ./ 
 COPY tsconfig*.json ./
 COPY libs ./libs
 COPY apps/provider ./apps/provider
@@ -17,7 +17,7 @@ COPY apps/provider ./apps/provider
 # ⚙️ Устанавливаем все зависимости (в корне)
 RUN npm install --no-fund --no-audit
 
-# 🔧 Устанавливаем dev-зависимости, нужные для компиляции
+# 🔧 Устанавливаем dev-зависимости для компиляции
 RUN npm install --no-fund --no-audit --save-dev typescript @types/node reflect-metadata
 
 # 🏗️ Компиляция TypeScript (все библиотеки + provider)
@@ -31,8 +31,9 @@ WORKDIR /usr/src/app
 
 ENV NODE_ENV=production
 
-# 📦 Копируем артефакты сборки и package.json
-COPY --from=builder /usr/src/monorepo/apps/provider/dist ./dist
+# 📦 Копируем собранные артефакты
+# ВАЖНО: копируем именно dist/apps/provider, а не apps/provider/dist
+COPY --from=builder /usr/src/monorepo/dist/apps/provider ./dist
 COPY --from=builder /usr/src/monorepo/apps/provider/package*.json ./
 
 # 🧹 Устанавливаем только прод-зависимости
@@ -49,5 +50,5 @@ RUN apk add --no-cache python3 make g++ && \
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 USER appuser
 
-EXPOSE 3000
+EXPOSE 8081
 CMD ["npm", "run", "start:prod"]
