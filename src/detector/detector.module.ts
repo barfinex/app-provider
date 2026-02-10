@@ -1,23 +1,46 @@
+// src/detector/detector.module.ts
+
 import { Module, forwardRef } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
 import { HttpModule } from '@nestjs/axios';
 
-import { DetectorController } from './detector.controller';
-import { DetectorEntity } from './detector.entity';
 import { DetectorService } from './detector.service';
+import { DetectorController } from './detector.controller';
 
+import { DetectorRepository } from './detector.repository';
+
+// Needed for data dependencies
+import { QuestDBModule } from '../questdb/questdb.module';
+import { EventSinkModule } from '../questdb/event-sink/event-sink.module';
+
+// App modules
 import { ConnectorModule } from '../connector/connector.module';
 import { OrderModule } from '../order/order.module';
 
 @Module({
     imports: [
-        TypeOrmModule.forFeature([DetectorEntity]), // ✅ только свои репозитории
-        forwardRef(() => ConnectorModule),          // ✅ если нужен ConnectorService/BinanceService
-        forwardRef(() => OrderModule),              // ✅ если нужен OrderService
         HttpModule,
+
+        // ⭐ MUST BE IMPORTED ⭐
+        QuestDBModule,                  // → даёт QuestDBQueryService
+        forwardRef(() => EventSinkModule), // → даёт EventSinkRepository
+
+        // App architecture
+        forwardRef(() => ConnectorModule),
+        forwardRef(() => OrderModule),
     ],
-    controllers: [DetectorController],
-    providers: [DetectorService],
-    exports: [DetectorService],                   // ✅ отдаём сервис наружу
+
+    controllers: [
+        DetectorController,
+    ],
+
+    providers: [
+        DetectorService,
+        DetectorRepository,
+    ],
+
+    exports: [
+        DetectorService,
+        DetectorRepository,
+    ],
 })
 export class DetectorModule { }

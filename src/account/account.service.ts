@@ -1,4 +1,4 @@
-import { Inject, Injectable, forwardRef } from '@nestjs/common';
+import { Inject, Injectable, OnModuleInit, forwardRef } from '@nestjs/common';
 import {
     Account,
     ConnectorType,
@@ -10,27 +10,48 @@ import {
     Symbol,
 } from '@barfinex/types';
 import { ConnectorService } from '../connector/connector.service';
+import { BinanceClientService } from
+    '../connector/datasource/binance/core/binance.client';
 
 @Injectable()
 export class AccountService {
 
+    private readyResolver!: () => void;
+    private ready = new Promise<void>((resolve) => {
+        this.readyResolver = resolve;
+    });
+
+
+
     private readonly DAY = 86400000;
 
-
-    // @Inject(ConnectorService)
-    // private readonly connectorService: ConnectorService
-
     constructor(
-        // @InjectModel(OrderEntity.name) private readonly orderEntity: Model<OrderEntityDocument>,
-        // private detectorService: DetectorService
         @Inject(forwardRef(() => ConnectorService))
-        private readonly connectorService: ConnectorService
+        private readonly connectorService: ConnectorService,
+        private readonly binanceClient: BinanceClientService,
     ) { }
 
 
 
+    // async onModuleInit() {
+    //     console.log('🔥 AccountService onModuleInit');
+    //     await this.getAll();
 
-    async getAccountInfo(connectorType: ConnectorType, marketType: MarketType): Promise<Account> {
+    // }
+
+
+    async whenReady(): Promise<void> {
+        return this.ready;
+    }
+
+    // =========================================================================
+    // 🔹 SINGLE ACCOUNT
+    // =========================================================================
+
+    async getAccountInfo(
+        connectorType: ConnectorType,
+        marketType: MarketType,
+    ): Promise<Account> {
 
         let account: Account = {
             connectorType,
@@ -39,39 +60,115 @@ export class AccountService {
             positions: [],
             orders: [],
             symbols: [],
-            isActive: false
-        }
+            isActive: false,
+        };
 
-        account = await this.connectorService.getAccountInfo(connectorType, marketType)
+        await this.binanceClient.ensureReady();
 
-        //console.log('>>>>>account:', account);
+        account = await this.connectorService.getAccountInfo(
+            connectorType,
+            marketType,
+        );
 
         if (account && account.isActive) {
+            const orders: Order[] =
+                await this.connectorService.getAllOpenOrders({
+                    connectorType,
+                    marketType,
+                });
 
-            let orders: Order[] = await this.connectorService.getAllOpenOrders({ connectorType, marketType })
-            if (orders && orders.length > 0) account.orders = orders
+            if (orders?.length) {
+                account.orders = orders;
+            }
         }
 
-        return account
+        // =========================================================================
+        // 🔥 ВАЖНО: ЗАПОЛНЯЕМ SYMBOLS (утраченная логика)
+        // =========================================================================
+
+        const symbolsMap = new Map<string, Symbol>();
+
+        // 1️⃣ Из позиций
+        account.positions?.forEach((position) => {
+            if (position.symbol?.name) {
+                symbolsMap.set(position.symbol.name, {
+                    name: position.symbol.name,
+                    connectorType,
+                    marketType,
+                });
+            }
+        });
+
+        // 2️⃣ Из активов (asset + USDT)
+        const exchangeCurrency = 'USDT';
+
+        account.assets?.forEach((asset) => {
+            const base = asset.symbol?.name;
+            if (!base) return;
+
+            const symbolName =
+                base === exchangeCurrency
+                    ? exchangeCurrency
+                    : `${base}${exchangeCurrency}`;
+
+            symbolsMap.set(symbolName, {
+                name: symbolName,
+                connectorType,
+                marketType,
+            });
+        });
+
+        // 3️⃣ Гарантируем BTCUSDT
+        if (!symbolsMap.has('BTCUSDT')) {
+            symbolsMap.set('BTCUSDT', {
+                name: 'BTCUSDT',
+                connectorType,
+                marketType,
+            });
+        }
+
+        account.symbols = Array.from(symbolsMap.values());
+
+        return account;
     }
 
+    // =========================================================================
+    // 🔹 LEVERAGE
+    // =========================================================================
 
-    async changeLeverage(connectorType: ConnectorType, symbol: Symbol, newLeverage: number): Promise<Symbol> {
-
-        return await this.connectorService.changeLeverage(connectorType, symbol, newLeverage)
+    async changeLeverage(
+        connectorType: ConnectorType,
+        symbol: Symbol,
+        newLeverage: number,
+    ): Promise<Symbol> {
+        return await this.connectorService.changeLeverage(
+            connectorType,
+            symbol,
+            newLeverage,
+        );
     }
 
+    // =========================================================================
+    // 🔹 ASSETS INFO (MULTI-MARKET)
+    // =========================================================================
 
+    async getAssetsInfo(options: Connector): Promise<{
+        assets: Asset[];
+        positions: Position[];
+    }> {
 
-    async getAssetsInfo(options: Connector): Promise<any> {
-
-        let result: { assets: Asset[], positions: Position[] } = {
+        const result: { assets: Asset[]; positions: Position[] } = {
             assets: [],
-            positions: []
-        }
+            positions: [],
+        };
 
         const promises = options.markets.map(async (market) => {
-            const assetsInfo = await this.connectorService.getAssetsInfo(options.connectorType, market.marketType);
+            const assetsInfo =
+                await this.connectorService.getAssetsInfo(
+                    options.connectorType,
+                    market.marketType,
+                );
+
             return {
                 assets: assetsInfo.assets,
                 positions: assetsInfo.positions,
@@ -85,22 +182,32 @@ export class AccountService {
             result.positions.push(...assetsInfo.positions);
         });
 
-        return result
+        return result;
     }
 
+    // =========================================================================
+    // 🔹 ALL ACCOUNTS
+    // =========================================================================
 
     async getAll(): Promise<Account[]> {
         const accounts: Account[] = [];
 
-        // Берём строго значения enum, а не ключи
+
         const connectorTypes = Object.values(ConnectorType);
         const marketTypes = Object.values(MarketType);
 
+        // console.log('ConnectorTypes:', connectorTypes);
+        // console.log('MarketTypes:', marketTypes);
+
         for (const connectorType of connectorTypes) {
             for (const marketType of marketTypes) {
-                const account = await this.getAccountInfo(connectorType, marketType);
 
-                // если аккаунт активен — добавляем
+                // console.log('ConnectorTypes:', connectorTypes);
+                // console.log('MarketTypes:', marketTypes);
+
+                const account =
+                    await this.getAccountInfo(connectorType, marketType);
+
                 if (account?.isActive) {
                     accounts.push(account);
                 }
@@ -108,7 +215,11 @@ export class AccountService {
         }
 
         ConnectorService.setAccounts(accounts);
+
+        // console.log("accounts:", accounts)
+
+        this.readyResolver();
+
         return accounts;
     }
-
 }

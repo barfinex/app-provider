@@ -9,12 +9,10 @@ import {
     OrderSource,
     Symbol
 } from '@barfinex/types';
-import { OrderEntity } from './order.entity';
-import { Repository } from 'typeorm';
-import { InjectRepository } from '@nestjs/typeorm';
-import { paginate } from '../common/pagination/paginate';
+
+import { OrderEntity, OrderRepository } from './order.repository';
 import { ConnectorService } from '../connector/connector.service';
-import { ObjectId } from "typeorm";
+
 import moment from 'moment';
 import 'moment-timezone';
 
@@ -24,308 +22,273 @@ export class OrderService {
     constructor(
         @Inject(forwardRef(() => ConnectorService))
         private readonly connectorService: ConnectorService,
-        @InjectRepository(OrderEntity) private readonly orderRepository: Repository<OrderEntity>
-    ) {
 
-    }
+        private readonly orderRepository: OrderRepository,
+    ) { }
 
-    async getOpenOrders(options: { connectorType: ConnectorType, marketType: MarketType, symbol?: Symbol, symbols: Symbol[], useSandbox?: boolean, source: OrderSource, query?: { limit?: number, page?: number, search?: string } }): Promise<Array<{ id: number, order: Order }> | any> {
+    // ============================================================================
+    // GET OPEN ORDERS
+    // ============================================================================
 
+    async getOpenOrders(options: {
+        connectorType: ConnectorType,
+        marketType: MarketType,
+        symbol?: Symbol,
+        symbols: Symbol[],
+        useSandbox?: boolean,
+        source: OrderSource,
+        query?: { limit?: number, page?: number, search?: string }
+    }) {
+        const { connectorType, marketType, symbol, symbols, source, useSandbox, query } = options;
 
-        let total: number = 0;
+        const sourceSysname = source.key;
+        const sourceType = source.type as OrderSourceType;
 
-        const { connectorType, marketType, symbol, useSandbox, source, symbols, query } = options
-
-        const sourceSysname = source.key
-        const sourceType = source.type as OrderSourceType
-
-        let data: Array<{ id: string, order: Order }> = [];
-
-        let { search = '', limit = 1000, page = 1 } = query || {}
-
+        let { limit = 1000, page = 1 } = query || {};
         limit = +limit;
         page = +page;
 
-        const startIndex = (page - 1) * limit;
+        const offset = (page - 1) * limit;
 
+        let data: Array<{ id: string, order: Order }> = [];
+        let total = 0;
+
+        // SANDBOX
         if (useSandbox) {
+            const where = symbol
+                ? `sourceSysname='${sourceSysname}' AND sourceType='${sourceType}' AND symbol='${symbol.name}'`
+                : `sourceSysname='${sourceSysname}' AND sourceType='${sourceType}'`;
 
-            let orderEntitis: [OrderEntity[], number]
+            const [rows, count] = await this.orderRepository.findAndCount(where, limit, offset);
+            total = count;
 
-            if (symbol) {
+            rows
+                .map(entity => this.orderEntityToOrder(entity))
+                .forEach(order => data.push({ id: order.id!, order }));
 
-                if (query!.limit) orderEntitis = await this.orderRepository.findAndCount({
-                    where: { sourceSysname, sourceType, symbol: symbol.name }, order: { time: 'DESC' }, skip: startIndex, take: limit
-                })
-                else orderEntitis = await this.orderRepository.findAndCount({ where: { sourceSysname, sourceType, symbol: symbol.name }, order: { time: 'DESC' } })
-
-                total = orderEntitis[1];
-            } else {
-
-                if (query!.limit) orderEntitis = await this.orderRepository.findAndCount({ where: { sourceSysname, sourceType, }, order: { time: 'DESC' }, skip: startIndex, take: limit })
-                else orderEntitis = await this.orderRepository.findAndCount({ where: { sourceSysname, sourceType, }, order: { time: 'DESC' } })
-
-                total = orderEntitis[1];
-            }
-
-            orderEntitis[0].map(orderEntity => this.orderEntityToOrder(orderEntity))
-                .forEach(order => {
-                    if (order.id) data.push({ id: order.id, order })
-                });
-
-        } else {
-
-            let entityOrders: OrderEntity[] = []
-            let connectorOrders: Order[] = []
-
-            if (symbol) {
-                entityOrders = await this.orderRepository.find({ where: { sourceSysname, sourceType, symbol: symbol.name, connectorType, marketType }, order: { time: 'DESC' } });
-                connectorOrders = await this.connectorService.getOpenOrders({ source, symbol, connectorType, marketType })
-            }
-            else {
-                entityOrders = await this.orderRepository.find({ where: { sourceSysname, sourceType, connectorType, marketType }, order: { time: 'DESC' } });
-
-                for (let i = 0; i < symbols.length; i++) {
-                    const symbol = symbols[i];
-
-                    const orders = await this.connectorService.getOpenOrders({ source, symbol: symbol, connectorType, marketType });
-                    orders.forEach(order => {
-                        connectorOrders.push(order)
-                    });
-                }
-            }
-
-            for (let i = 0; i < connectorOrders.length; i++) {
-                const order = connectorOrders[i];
-
-                if (order.externalId) {
-                    const orderEntity = entityOrders.find(q => q.externalId == order.externalId && q.connectorType == connectorType && q.marketType == marketType)
-                    console.log('getOpenOrder');
-
-                    if (orderEntity) {
-                        // update Entity
-                        order.id = orderEntity.id.toString()
-                        await this.orderRepository.update(order.id, this.orderToOrderEntity(order))
-                    }
-                    else {
-                        // create Entity
-                        order.id = (this.orderRepository.create(this.orderToOrderEntity(order))).id.toString()
-                    }
-
-                    data.push({ id: order.id, order });
-                }
-            }
-
-            // delete Entity
-            let entityIdsForDelete = entityOrders.filter(q => connectorOrders.find(qq => qq.externalId == q.externalId) != null).map(q => q.id)
-            if (entityIdsForDelete.length > 0) await this.orderRepository.delete(entityIdsForDelete)
+            return { data, total, page, limit };
         }
 
-        // const results = data;
-        //const results = data.slice(startIndex, endIndex);
-        // const results = data.slice(startIndex, endIndex);
-        const url = `/api/orders/detector/${options.source.key}?page=${page}&limit=${limit}`;
+        // LIVE MODE — QuestDB + биржа
+        const whereBase =
+            `sourceSysname='${sourceSysname}' AND sourceType='${sourceType}' AND ` +
+            `connectorType='${connectorType}' AND marketType='${marketType}'`;
 
-        if (options.query && options.query.limit)
-            return {
-                data,
-                ...paginate(total, page, limit, data.length, url),
-            };
-        else return data;
-    }
+        const entityOrders = await this.orderRepository.find(whereBase);
 
+        let connectorOrders: Order[] = [];
 
+        if (symbol) {
+            connectorOrders = await this.connectorService.getOpenOrders({
+                source,
+                symbol,
+                connectorType,
+                marketType
+            });
+        } else {
+            for (const s of symbols) {
+                const list = await this.connectorService.getOpenOrders({
+                    source,
+                    symbol: s,
+                    connectorType,
+                    marketType
+                });
+                connectorOrders.push(...list);
+            }
+        }
 
-    async getOpenOrdersCount(options: { symbols: Symbol[], sourceSysname: string, sourceType: OrderSourceType }): Promise<Array<{ symbol: Symbol, ordersCount: number }> | any> {
+        for (const o of connectorOrders) {
+            if (!o.externalId) continue;
 
-        const { sourceSysname, sourceType, symbols } = options
-        let data: Array<{ symbol: Symbol, ordersCount: number }> = [];
+            const existing = entityOrders.find(
+                e =>
+                    e.externalId === o.externalId &&
+                    e.connectorType === connectorType &&
+                    e.marketType === marketType,
+            );
 
+            if (existing) {
+                o.id = existing.id;
+                await this.orderRepository.update(existing.id, this.orderToOrderEntity(o));
+            } else {
+                const entity = this.orderToOrderEntity(o);
+                await this.orderRepository.insert(entity);
+                o.id = entity.id;
+            }
 
-        for (let i = 0; i < symbols.length; i++) {
-            const symbol = symbols[i];
-
-            const ordersCount = await this.orderRepository.countBy({ sourceSysname, sourceType, symbol: symbol.name })
-            data.push({ symbol, ordersCount })
+            data.push({ id: o.id!, order: o });
         }
 
         return data;
     }
 
-    async openOrder(order: Order): Promise<Order> {
+    // ============================================================================
+    // COUNT OPEN ORDERS
+    // ============================================================================
 
-        // let { order } = options
+    async getOpenOrdersCount(options: {
+        symbols: Symbol[],
+        sourceSysname: string,
+        sourceType: OrderSourceType
+    }) {
+        const { symbols, sourceSysname, sourceType } = options;
 
-        // console.log('connectorType', connectorType);
+        const result: Array<{ symbol: Symbol, ordersCount: number }> = [];
 
-        // console.log('order:', order);
-        // console.log("order.time UTC:", moment.utc(order.time).format('YYYY-MM-DD HH:mm:ss'));
-
-        // order.connectorType = connectorType
-        // order.marketType = marketType
-
-        order = await this.connectorService.openOrder(order)
-
-        // console.log('openOrder');
-
-        const orderEntity = await this.orderRepository.save(this.orderToOrderEntity(order))
-
-        order.id = orderEntity.id.toString()
-
-
-        // this.connectorService.openOrder
-
-
-
-        return order;
-    }
-
-    //    async closeOrder(options: { id?: number, externalId?: string, symbol: Symbol, connectorType?: ConnectorType, marketType?: MarketType, source: OrderSource }): Promise<Order> {
-    async closeOrder(order: Order): Promise<Order> {
-
-        let result: Order = {} as Order
-
-        let orderEntity: OrderEntity | null = null;
-
-        if (order.id) {
-            orderEntity = await this.orderRepository.findOne({ where: { id: new ObjectId(order.id) } })
-            if (orderEntity) {
-                order.externalId = orderEntity.externalId
-                orderEntity.closeTime = moment(moment.utc(new Date()).format('YYYY-MM-DD HH:mm:ss')).unix()
-            }
-        }
-
-        if (order.externalId) await this.connectorService.closeOrder(order)
-
-        if (orderEntity && order.id) {
-            await this.orderRepository.update(order.id, orderEntity)
-            result = this.orderEntityToOrder(orderEntity)
+        for (const s of symbols) {
+            const where = `sourceSysname='${sourceSysname}' AND sourceType='${sourceType}' AND symbol='${s.name}'`;
+            const count = await this.orderRepository.count(where);
+            result.push({ symbol: s, ordersCount: count });
         }
 
         return result;
     }
 
-    async updateOrder(options: { id: string, order: Order }): Promise<Order> {
+    // ============================================================================
+    // OPEN ORDER
+    // ============================================================================
 
-        const { id, order } = options
-        order.id = id
+    async openOrder(order: Order): Promise<Order> {
+        order = await this.connectorService.openOrder(order);
 
-        const orderEntity: OrderEntity | null = await this.orderRepository.findOne({ where: { id: new ObjectId(id) } })
+        const entity = this.orderToOrderEntity(order);
+        await this.orderRepository.insert(entity);
 
-        if (orderEntity && !orderEntity.useSandbox) {
-            await this.connectorService.closeOrder(this.orderEntityToOrder(orderEntity))
-
-            const newOrder = await this.openOrder(order)
-            if (newOrder.id) {
-                order.externalId = newOrder.id.toString()
-            }
-        }
-
-        console.log('updateOrder');
-        await this.orderRepository.update(id, this.orderToOrderEntity(order))
+        order.id = entity.id;
         return order;
     }
 
-    async deleteAll(options: { connectorType: ConnectorType, marketType: MarketType, symbols?: Symbol[] }): Promise<boolean> {
+    // ============================================================================
+    // CLOSE ORDER
+    // ============================================================================
 
-        const { connectorType, marketType, symbols } = options
+    async closeOrder(order: Order): Promise<Order> {
+        let entity = order.id
+            ? await this.orderRepository.getById(order.id)
+            : null;
 
-        let result = false
-        let ordersEntity: OrderEntity[]
-
-        if (connectorType && marketType) {
-
-            // ordersEntity = await this.orderRepository.find({ where: { detectorSysname } })
-            // console.log("ordersEntity.length:", ordersEntity.length);
-
-
-            this.orderRepository.delete({ connectorType, marketType })
-
-            // // ordersEntity = await this.orderRepository.find({ where: { detectorSysname } })
-            // // console.log("ordersEntity.length:", ordersEntity.length);
-            // // const ids = ordersEntity.map(q => q.id)
-            // // if (ids.length > 0) {
-            // //     console.log("ids.length:", ids.length);
-            // //     await this.orderRepository.delete({ id: In(ids) })
-            // //     console.log("ids.length:", ids.length);
-            // // }
-
-
-            // for (let i = 0; i < symbols.length; i++) {
-            //     const symbol = symbols[i];
-            //     await this.connectorService.closeAllOrders({ symbol, connectorType, marketType })
-            // }
-
-
-
-
-            result = true
+        if (entity) {
+            order.externalId = entity.externalId;
+            entity.closeTime = moment.utc().unix();
         }
 
-        return result
+        if (order.externalId) {
+            await this.connectorService.closeOrder(order);
+        }
+
+        if (entity) {
+            await this.orderRepository.update(entity.id, entity);
+            return this.orderEntityToOrder(entity);
+        }
+
+        return order;
     }
+
+    // ============================================================================
+    // UPDATE ORDER
+    // ============================================================================
+
+    async updateOrder(options: { id: string, order: Order }): Promise<Order> {
+        const { id, order } = options;
+
+        const existing = await this.orderRepository.getById(id);
+        if (!existing) return order;
+
+        if (!existing.useSandbox) {
+            await this.connectorService.closeOrder(this.orderEntityToOrder(existing));
+
+            const newOrder = await this.openOrder(order);
+            order.externalId = newOrder.id!;
+        }
+
+        await this.orderRepository.update(id, this.orderToOrderEntity(order));
+        return order;
+    }
+
+    // ============================================================================
+    // DELETE ALL
+    // ============================================================================
+
+    async deleteAll(options: { connectorType: ConnectorType, marketType: MarketType }) {
+        const { connectorType, marketType } = options;
+
+        const where =
+            `connectorType='${connectorType}' AND marketType='${marketType}'`;
+
+        await this.orderRepository.deleteWhere(where);
+
+        return true;
+    }
+
+    // ============================================================================
+    // GET BY ID
+    // ============================================================================
 
     async get(id: string): Promise<Order> {
+        const entity = await this.orderRepository.getById(id);
+        if (!entity) throw new Error('Order not found');
 
-        const orderEntity = await this.orderRepository.findOne({ where: { id: new ObjectId(id) } })
-        if (orderEntity)
-            return this.orderEntityToOrder(orderEntity)
-        else throw new Error('Order not found')
+        return this.orderEntityToOrder(entity);
     }
 
-    private orderToOrderEntity(order: Order): OrderEntity {
-        console.log("order:", order);
+    // ============================================================================
+    // MAPPERS
+    // ============================================================================
 
-        const result: OrderEntity = {
-            id: order.id ? new ObjectId(order.id) : new ObjectId(),
+    private orderToOrderEntity(order: Order): OrderEntity {
+        return {
+            id: order.id ?? (Date.now().toString() + Math.random().toString(16).slice(2)),
             externalId: order.externalId ?? null,
-            connectorType: order.connectorType.toString(),
-            marketType: order.marketType.toString(),
+            connectorType: order.connectorType,
+            marketType: order.marketType,
             symbol: order.symbol?.name ?? '',
-            side: order.side?.toString() ?? null,
-            type: order.type?.toString() ?? null,
+
+            side: order.side ?? null,
+            type: order.type ?? null,
             price: order.price ?? null,
+
             sourceSysname: order.source.key,
             sourceType: order.source.type,
             sourceBaseApiUrl: order.source.restApiUrl ?? '',
-            time: order.time ? +order.time : moment.utc(new Date()).unix(),
+
+            time: order.time ?? moment.utc().unix(),
             updateTime: order.updateTime ?? null,
+
             quantity: order.quantity ?? null,
             quantityExecuted: order.quantityExecuted ?? null,
+
             priceClose: order.priceClose ?? null,
+            closeTime: order.closeTime ?? null,
+
             useSandbox: order.useSandbox ?? true,
-            closeTime: order.closeTime ?? null, // ✅ добавлено
-        };
 
-        return result;
+            status: 'active',
+            deletedAt: null,
+        };
     }
 
-    private orderEntityToOrder(orderEntity: OrderEntity): Order {
+    private orderEntityToOrder(entity: any): Order {
         return {
-            symbol: { name: orderEntity.symbol },
-            id: orderEntity.id.toString(),
-            externalId: orderEntity.externalId,
-            side: orderEntity.side as OrderSide,
-            type: orderEntity.type as OrderType,
-            price: orderEntity.price,
+            id: entity.id,
+            externalId: entity.externalId,
+            symbol: { name: entity.symbol },
+            connectorType: entity.connectorType as ConnectorType,
+            marketType: entity.marketType as MarketType,
+            side: entity.side as OrderSide,
+            type: entity.type as OrderType,
+            price: entity.price,
             source: {
-                key: orderEntity.sourceSysname,
-                type: orderEntity.sourceType as OrderSourceType,
-                restApiUrl: orderEntity.sourceBaseApiUrl,
+                key: entity.sourceSysname,
+                type: entity.sourceType as OrderSourceType,
+                restApiUrl: entity.sourceBaseApiUrl,
             },
-            time: orderEntity.time,
-            updateTime: orderEntity.updateTime,
-            quantity: orderEntity.quantity,
-            quantityExecuted: orderEntity.quantityExecuted,
-            priceClose: orderEntity.priceClose,
-            useSandbox: orderEntity.useSandbox,
-            connectorType: orderEntity.connectorType as ConnectorType,
-            marketType: orderEntity.marketType as MarketType,
-            closeTime: (orderEntity.closeTime ?? null) as null,
+            time: entity.time,
+            updateTime: entity.updateTime,
+            quantity: entity.quantity,
+            quantityExecuted: entity.quantityExecuted,
+            priceClose: entity.priceClose,
+            useSandbox: entity.useSandbox,
+            closeTime: entity.closeTime,
         };
     }
-
-
-
-
 }

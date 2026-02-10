@@ -1,18 +1,14 @@
-import { Body, Controller, Delete, Get, Post, Put } from '@nestjs/common';
-import { Param, Query } from '@nestjs/common/decorators/http/route-params.decorator';
-import { InspectorService } from './inspector.service';
-import { Inspector, TimeFrame } from '@barfinex/types';
+// src/inspector/inspector.controller.ts
+import { Body, Controller, Delete, Get, Param, Post, Put } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
+
+import { InspectorService } from './inspector.service';
+import { Inspector } from '@barfinex/types';
 
 @ApiTags('Inspectors')
 @Controller('inspectors')
 export class InspectorController {
-
-    constructor(
-        private inspectorService: InspectorService,
-    ) {
-
-    }
+    constructor(private readonly inspectorService: InspectorService) { }
 
     @Get()
     async getAll() {
@@ -21,54 +17,28 @@ export class InspectorController {
 
     @Get(':sysname')
     async get(@Param('sysname') sysname: string) {
-        return this.inspectorService.get(sysname)
+        return this.inspectorService.get(sysname);
     }
 
     @Post()
     async registration(
         @Body('sysname') sysname: string,
-        @Body('options') options: Inspector
+        @Body('options') options: Inspector,
     ) {
-        // const { connectorType, marketType, symbols, intervals, useScratch } = opt
-        const inspectorEntity = await this.inspectorService.create(sysname, options)
-
-        // if (useScratch) {
-        //     await this.inspectorService.deleteAllOrders({ connectorType, marketType, symbols, sysname })
-        // }
-        // const activeSymbols = await this.inspectorService.getAllActiveSymbols()
-        // await this.inspectorService.updateSubscribeCollectionInConnector({ connectorType, marketType, symbols: activeSymbols, intervals })
-
-        return inspectorEntity.options;
+        const entity = await this.inspectorService.create(sysname, options);
+        return entity.options;
     }
 
     @Put(':sysname')
     async update(
         @Param('sysname') sysname: string,
-        @Body('options') options: Inspector
+        @Body('options') options: Inspector,
     ) {
-
-        // const { connectorType, marketType, symbols } = inspectorOptions
-        const inspectorEntity = await this.inspectorService.update(sysname, options)
-        // const activeSymbols = await this.inspectorService.getAllActiveSymbols()
-        // this.inspectorService.updateSubscribeCollectionInConnector({ connectorType, marketType, symbols: activeSymbols, intervals: null });
-
-        return inspectorEntity
+        return this.inspectorService.update(sysname, options);
     }
 
     @Delete(':sysname')
     async delete(@Param('sysname') sysname: string) {
-
-        let isDelete = false
-        // let { connectorType, marketType, symbols } = await this.inspectorService.getOptions(sysname)
-
-        // if (connectorType) {
-        //     await this.inspectorService.deleteAllOrders({ connectorType, marketType, symbols, sysname })
-        //     isDelete = await this.inspectorService.delete(sysname)
-        //     const activeSymbols = await this.inspectorService.getAllActiveSymbols()
-        //     this.inspectorService.updateSubscribeCollectionInConnector({ connectorType, marketType, symbols: activeSymbols, intervals: null })
-        // }
-
-        return isDelete
+        return this.inspectorService.delete(sysname);
     }
-
 }

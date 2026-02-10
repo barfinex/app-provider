@@ -1,21 +1,45 @@
+// src/order/order.module.ts
+
 import { Module, forwardRef } from '@nestjs/common';
+
 import { OrderController } from './order.controller';
 import { OrderService } from './order.service';
-import { OrderEntity } from './order.entity';
-import { TypeOrmModule } from '@nestjs/typeorm';
-import { DetectorEntity } from '../detector/detector.entity';
-import { ConnectorEntity } from '../connector/connector.entity';
+import { OrderRepository } from './order.repository';
+
+import { OrderEventAdapter } from '../questdb/event-sink/adapters/order.adapter';
+
+// 🔁 cyclic dependencies
 import { ConnectorModule } from '../connector/connector.module';
 import { DetectorModule } from '../detector/detector.module';
 
+// 🧱 infra
+import { QuestDBModule } from '../questdb/questdb.module';
+import { EventSinkModule } from '../questdb/event-sink/event-sink.module';
+
 @Module({
     imports: [
-        TypeOrmModule.forFeature([OrderEntity, DetectorEntity, ConnectorEntity]),
+        // 🔁 cycles
+        forwardRef(() => ConnectorModule),
         forwardRef(() => DetectorModule),
-        ConnectorModule
+
+        // 🧱 infra
+        QuestDBModule,
+        EventSinkModule,
     ],
-    controllers: [OrderController],
-    providers: [OrderService],
-    exports: [OrderService]
+
+    controllers: [
+        OrderController,
+    ],
+
+    providers: [
+        OrderService,
+        OrderRepository,
+        OrderEventAdapter,
+    ],
+
+    exports: [
+        OrderService,
+        OrderRepository,
+    ],
 })
 export class OrderModule { }

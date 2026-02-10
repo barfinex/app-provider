@@ -113,8 +113,24 @@ docker run -d -p 8081:8081 --env-file .env.production --name barfinex-provider b
 ---
 
 ### 🧩 Пример `.env` файла
+```bash
+APP_IDENTITY=provider
+NODE_ENV=development
 
-(Оригинальный блок сохранён без изменений)
+PROVIDER_API_PORT=8081
+PROVIDER_API_TOKEN="ExampleToken#123"
+
+MONGO_HOST=mongo
+REDIS_HOST=redis
+
+# QuestDB
+QUESTDB_HOST=questdb
+QUESTDB_PG_PORT=8812
+QUESTDB_ILP_PORT=9009
+QUESTDB_HTTP_PORT=9000
+QUESTDB_USER=admin
+QUESTDB_PASSWORD=quest
+```
 
 ---
 
@@ -234,6 +250,15 @@ services:
       MONGO_INITDB_ROOT_USERNAME: admin
       MONGO_INITDB_ROOT_PASSWORD: admin123
 
+  questdb:
+    image: questdb/questdb:latest
+    ports:
+      - "8812:8812"
+      - "9000:9000"
+      - "9009:9009"
+    volumes:
+      - ./data/questdb:/root/.questdb
+
   redis:
     image: redis:7.0
     ports:
@@ -263,6 +288,7 @@ docker compose up -d
 - **TypeScript** – строгая типизация и масштабируемость  
 - **Docker** – контейнеризация и оркестрация сервисов  
 - **Binance / Alpaca / Tinkoff APIs** – внешние финансовые интеграции  
+- **QuestDB** — хранилище временных рядов
 
 ---
 
@@ -272,11 +298,11 @@ docker compose up -d
 с дополнительными ограничениями на **некоммерческое использование** и **обязательную атрибуцию**.
 
 ### Условия
-1. Указание авторства “Barfin Network Limited” и ссылка на [https://barfin.network/](https://barfin.network/).  
+1. Указание авторства “Barfin Network Limited” и ссылка на [https://barfinex.com/](https://barfinex.com/).  
 2. Коммерческое использование — только с письменного разрешения.  
 3. Некоммерческие распространения должны сохранять брендинг и ссылки.
 
 Для разрешений и партнёрств:  
-📩 [https://barfin.network/](https://barfin.network/)
+📩 [https://barfinex.com/](https://barfinex.com/)
 
 ---

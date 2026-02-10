@@ -1,17 +1,17 @@
+// src/inspector/inspector.service.ts
 import {
-    Inject,
     Injectable,
+    Inject,
     InternalServerErrorException,
     NotFoundException,
     forwardRef,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+
 import { HttpService } from '@nestjs/axios';
-import { InspectorEntity } from './inspector.entity';
-import {
-    Inspector,
-} from '@barfinex/types';
+
+import { InspectorRepository, InspectorEntity } from './inspector.repository';
+import { Inspector } from '@barfinex/types';
+
 import { ConnectorService } from '../connector/connector.service';
 import { OrderService } from '../order/order.service';
 
@@ -20,8 +20,7 @@ export class InspectorService {
     constructor(
         private readonly http: HttpService,
 
-        @InjectRepository(InspectorEntity)
-        private readonly inspectorRepository: Repository<InspectorEntity>,
+        private readonly inspectorRepository: InspectorRepository,
 
         @Inject(forwardRef(() => ConnectorService))
         private readonly connectorService: ConnectorService,
@@ -30,36 +29,38 @@ export class InspectorService {
         private readonly orderService: OrderService,
     ) { }
 
-    /** Получить все инспекторы */
+    // -------------------------------------------------------
+    // GET ALL
+    // -------------------------------------------------------
     async getAll(): Promise<InspectorEntity[]> {
-        return await this.inspectorRepository.find();
+        return this.inspectorRepository.find();
     }
 
-    /** Создать или обновить инспектора */
+    // -------------------------------------------------------
+    // CREATE OR UPDATE
+    // -------------------------------------------------------
     async create(name: string, options: Inspector): Promise<InspectorEntity> {
-        let inspector = await this.inspectorRepository.findOne({ where: { name } });
+        const existing = await this.inspectorRepository.findOne({ where: { name } });
 
-        if (inspector) {
-            inspector.options = options;
-            // ✅ безопасное обновление с отключенной строгой проверкой типов
-            await this.inspectorRepository.update(inspector.id, inspector as any);
-        } else {
-            await this.inspectorRepository.save({ name, options } as any);
-            inspector = await this.inspectorRepository.findOne({ where: { name } });
+        if (existing) {
+            existing.options = options;
+            await this.inspectorRepository.update(name, {
+                options,
+                updatedAt: Date.now(),
+            });
+            return existing;
         }
 
-        if (!inspector) {
-            throw new InternalServerErrorException(
-                `Failed to create or update inspector "${name}"`,
-            );
-        }
-
-        return inspector;
+        const entity = this.inspectorRepository.create({ name, options });
+        await this.inspectorRepository.insert(entity);
+        return entity;
     }
 
-    /** Получить конфигурацию инспектора по имени (sysname) */
+    // -------------------------------------------------------
+    // GET (with default)
+    // -------------------------------------------------------
     async get(sysname: string): Promise<Inspector> {
-        let result: Inspector = {
+        const empty: Inspector = {
             key: '',
             restApiUrl: '',
             general: { apiPort: 0 },
@@ -89,35 +90,40 @@ export class InspectorService {
             },
         };
 
-        const inspector = await this.inspectorRepository.findOne({
+        const found = await this.inspectorRepository.findOne({
             where: { name: sysname },
         });
 
-        if (inspector) result = inspector.options;
-        return result;
+        return found ? found.options : empty;
     }
 
-    /** Обновить существующего инспектора */
+    // -------------------------------------------------------
+    // UPDATE
+    // -------------------------------------------------------
     async update(name: string, options: Inspector): Promise<InspectorEntity> {
-        const inspector = await this.inspectorRepository.findOne({ where: { name } });
+        const existing = await this.inspectorRepository.findOne({ where: { name } });
 
-        if (!inspector) {
-            throw new NotFoundException(`Inspector with name "${name}" not found`);
-        }
+        if (!existing) throw new NotFoundException(`Inspector "${name}" not found`);
 
-        inspector.options = options;
-        await this.inspectorRepository.update(inspector.id, inspector as any);
+        existing.options = options;
 
-        return inspector;
+        await this.inspectorRepository.update(name, {
+            options,
+            updatedAt: Date.now(),
+        });
+
+        return existing;
     }
 
-    /** Удалить инспектора по имени */
+    // -------------------------------------------------------
+    // DELETE
+    // -------------------------------------------------------
     async delete(name: string): Promise<boolean> {
-        const inspector = await this.inspectorRepository.findOne({ where: { name } });
+        const existing = await this.inspectorRepository.findOne({ where: { name } });
 
-        if (!inspector) return false;
+        if (!existing) return false;
 
-        await this.inspectorRepository.delete(inspector.id);
+        await this.inspectorRepository.delete(name);
         return true;
     }
 }

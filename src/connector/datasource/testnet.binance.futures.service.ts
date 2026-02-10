@@ -61,7 +61,7 @@ import {
 import moment from 'moment';
 import { ConnectorService } from "../connector.service";
 import { ConfigService } from "@barfinex/config";
-import { candleMapper } from "@barfinex/utils";
+// import { candleMapper } from "@barfinex/utils";
 
 @Injectable()
 export class TestnetBinanceFuturesService implements OnModuleInit, DataSource {
@@ -1006,18 +1006,18 @@ export class TestnetBinanceFuturesService implements OnModuleInit, DataSource {
 
             const { isFinal, open, high, low, close, volume, startTime, symbol, firstTradeId, lastTradeId, } = msg
 
-            if (isFinal) {
-                handler(MarketType.futures, candleMapper.toDomainCandle({
-                    o: parseFloat(open),
-                    h: parseFloat(high),
-                    l: parseFloat(low),
-                    c: parseFloat(close),
-                    v: parseFloat(volume),
-                    time: startTime,
-                    interval,
-                    symbol: { name: symbol }
-                }));
-            }
+            //     if (isFinal) {
+            //         handler(MarketType.futures, candleMapper.toDomainCandle({
+            //             o: parseFloat(open),
+            //             h: parseFloat(high),
+            //             l: parseFloat(low),
+            //             c: parseFloat(close),
+            //             v: parseFloat(volume),
+            //             time: startTime,
+            //             interval,
+            //             symbol: { name: symbol }
+            //         }));
+            //     }
         };
     }
 

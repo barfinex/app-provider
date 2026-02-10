@@ -1,72 +1,155 @@
-import { Body, Controller, Delete, Get, Inject, Post, Put } from '@nestjs/common';
-import { Param } from '@nestjs/common/decorators/http/route-params.decorator';
-// import { ClientProxy } from '@nestjs/microservices';
-import { CandleService } from './candle.service';
-import { MarketType, ConnectorType, TimeFrame, Symbol } from '@barfinex/types';
+import { Controller, Get, Param, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { DetectorService } from '../detector/detector.service';
+
+import {
+    ConnectorType,
+    MarketType,
+    TimeFrame,
+} from '@barfinex/types';
+
+import { CandleQueryService } from './candle-query.service';
+import { CandleService } from './candle.service';
+import { toDomainInterval } from './time/time.utils';
 
 @ApiTags('Candles')
 @Controller('candles')
 export class CandleController {
-
     constructor(
-        private candleService: CandleService
+        private readonly query: CandleQueryService,
+        private readonly candleService: CandleService,
     ) { }
 
-
-    @Post()
-    async create(
-        @Body('title') title: string,
-        @Body('image') image: string
-    ) {
-        const candle = await this.candleService.create({ title, image })
-        // this.client.emit('candle_created', candle)
-        return candle
-    }
-
+    // =========================================================================
+    // 🔹 GET /candles/:connectorType/:marketType/:symbol/:interval
+    // =========================================================================
     @Get(':connectorType/:marketType/:symbol/:interval')
-    async get(
+    async getCandles(
         @Param('connectorType') connectorType: ConnectorType,
         @Param('marketType') marketType: MarketType,
-        @Param('symbol') symbol: Symbol,
-        @Param('interval') interval: TimeFrame,
+        @Param('symbol') symbol: string,
+        @Param('interval') intervalRaw: string,
+
+        @Query('from') from?: string,
+        @Query('to') to?: string,
+        @Query('days') days?: string,
     ) {
-        return this.candleService.get(connectorType, marketType, symbol, interval)
+        // 🔐 ЕДИНСТВЕННАЯ точка нормализации таймфрейма
+        const interval = toDomainInterval(intervalRaw) as TimeFrame;
+
+        let anchorTs: number | null;
+
+        // ---------------------------------------------------------------------
+        // Anchor resolution (ЕДИНСТВЕННАЯ точка правды)
+        // ---------------------------------------------------------------------
+
+        // 1️⃣ Явно передан `to`
+        if (to) {
+            anchorTs = Number(to);
+        }
+
+        // 3️⃣ Initial load → last ts from DB
+        else {
+            anchorTs = await this.query.loadLastTimestamp({
+                symbol,
+                connectorType,
+                marketType,
+                interval,
+            });
+        }
+
+
+        console.log("anchorTs:", anchorTs);
+
+
+        if (!anchorTs || !Number.isFinite(anchorTs)) {
+            throw new Error(
+                `No candles found for ${symbol} ${connectorType} ${marketType} ${interval}`
+            );
+        }
+
+        // ---------------------------------------------------------------------
+        // Range resolution
+        // ---------------------------------------------------------------------
+        const { fromTs, toTs } = this.resolveRange(
+            interval,
+            anchorTs,
+            from,
+            to,
+            days,
+        );
+
+
+        console.log("fromTs:", fromTs);
+        console.log("toTs:", toTs);
+
+
+        if (fromTs === null) {
+            return [];
+        }
+
+        return this.query.loadRangeNormalized({
+            connectorType,
+            marketType,
+            symbol,
+            interval,
+            from: fromTs,
+            to: toTs,
+        });
     }
 
+    // =========================================================================
+    // 🔹 GET /candles/detector/:detectorSysname/symbol/:symbol/:interval
+    // =========================================================================
     @Get('/detector/:detectorSysname/symbol/:symbol/:interval')
-    async getByDetectorSysname(
+    async getByDetector(
         @Param('detectorSysname') detectorSysname: string,
-        @Param('symbol') symbol: Symbol,
-        @Param('interval') interval: TimeFrame,
+        @Param('symbol') symbol: string,
+        @Param('interval') intervalRaw: string,
     ) {
-        return this.candleService.getByDetectorSysname(detectorSysname, symbol, interval)
+        const interval = toDomainInterval(intervalRaw) as TimeFrame;
+
+        return this.candleService.getByDetectorSysname(
+            detectorSysname,
+            symbol,
+            interval,
+        );
     }
 
-    @Put(':id')
-    async update(
-        @Param('id') id: number,
-        @Body('title') title: string,
-        @Body('image') image: string
-    ) {
-        // await this.candleSecvice.update(id, { title, image })
+    // =========================================================================
+    // Helpers
+    // =========================================================================
+    private resolveRange(
+        interval: TimeFrame,
+        anchorTs: number,
+        from?: string,
+        to?: string,
+        days?: string,
+    ): { fromTs: number | null; toTs: number } {
 
-        // const candle = await this.candleSecvice.get(id)
+        // ✅ ПРАВАЯ ГРАНИЦА ВСЕГДА = anchorTs (если явно не передали to)
+        const toTs = to
+            ? Number(to)
+            : anchorTs;
 
-        // this.client.emit('candle_updated', candle)
+        let fromTs: number;
 
-        //return candle
+        if (from) {
+            fromTs = Number(from);
+        } else if (days) {
+            fromTs = toTs - Number(days) * 24 * 60 * 60 * 1000;
+        } else {
+            // дефолтные окна
+            fromTs =
+                interval === TimeFrame.min1
+                    ? toTs - 6 * 60 * 60 * 1000       // 6 часов
+                    : toTs - 7 * 24 * 60 * 60 * 1000; // 7 дней
+        }
+
+        if (!Number.isFinite(fromTs) || fromTs > toTs) {
+            return { fromTs: null, toTs };
+        }
+
+        return { fromTs, toTs };
     }
-
-    @Delete(':id')
-    async delete(@Param('id') id: number) {
-
-        //this.candleSecvice.delete(id)
-
-        // this.client.emit('candle_deleted', id)
-    }
-
-
 
 }

@@ -11,7 +11,7 @@
 
 [![ghcr](https://img.shields.io/badge/GHCR-ghcr.io%2Fbarfinex%2Fprovider-blue?logo=github&logoColor=white)](https://ghcr.io/barfinex/provider)
 [![dockerhub](https://img.shields.io/badge/DockerHub-barfinex%2Fprovider-blue?logo=docker&logoColor=white)](https://hub.docker.com/r/barfinex/provider)
-[![image-size](https://img.shields.io/docker/image-size/barfinex/provider/latest?label=image%20size%2089MB?label=image%20size%2089MB?label=image%20size%2089MB?label=image%20size%2089MB?label=image%20size%2089MB?label=image%20size%2089MB?label=image%20size%2089MB?label=image%20size%2089MB?label=image%20size)](https://ghcr.io/barfinex/provider)
+[![image-size](https://img.shields.io/docker/image-size/barfinex/provider/latest?label=image%20size%2089MB?label=image%20size%2089MB?label=image%20size%2089MB?label=image%20size%2089MB?label=image%20size%2089MB?label=image%20size%2089MB?label=image%20size%2089MB?label=image%20size%2089MB?label=image%20size%2089MB?label=image%20size)](https://ghcr.io/barfinex/provider)
 [![version](https://img.shields.io/badge/version-v31-blue)](https://ghcr.io/barfinex/provider)
 
 ---
@@ -113,110 +113,22 @@ Configuration files are environment-specific and located in the repository root.
 ### 🧩 Example Environment File
 
 ```bash
-# ============================================
-# 🌐 Application Environment
-# ============================================
 APP_IDENTITY=provider
 NODE_ENV=development
-CONFIG_FILE=config.json
 
-# ============================================
-# 🚀 Provider Service
-# ============================================
-PROVIDER_CONTAINER_NAME=provider
-PROVIDER_IMAGE=ghcr.io/barfin-network/provider:latest
-PROVIDER_COMMAND="yarn start:provider:dev"
 PROVIDER_API_PORT=8081
-PROVIDER_API_TOKEN="ExampleToken#123!ABC"
+PROVIDER_API_TOKEN="ExampleToken#123"
 
-# ============================================
-# 🔐 SSL Certificates (Local or Production)
-# ============================================
-SSL_CERT=./cert/localhost.pem
-SSL_KEY=./cert/localhost-key.pem
-
-# ============================================
-# 🗄️ MongoDB
-# ============================================
-MONGO_CONTAINER_NAME=mongo
-MONGO_IMAGE=mongo:6.0
-MONGO_PORT=27017
 MONGO_HOST=mongo
-# MONGO_HOST=localhost
-MONGO_ROOT_USERNAME=admin
-MONGO_ROOT_PASSWORD=admin123
-MONGO_DATABASE=barfinex_demo
-
-# ============================================
-# ⚡ Redis
-# ============================================
-REDIS_CONTAINER_NAME=redis
-REDIS_IMAGE=redis:7.0
-REDIS_PORT=6379
 REDIS_HOST=redis
-# REDIS_HOST=localhost
-WEBSOCKET_SERVER_PORT=6380
 
-# ============================================
-# 🧠 Binance API (Production Keys)
-# ============================================
-BINANCE_API_KEY=prod-binance-key-123456
-BINANCE_API_SECRET=prod-binance-secret-654321
-
-# ============================================
-# 🧪 Binance API (Testnet Keys)
-# ============================================
-TESTNET_BINANCE_SPOT_KEY=testnet-key-123456
-TESTNET_BINANCE_SPOT_SECRET=testnet-secret-654321
-
-# ============================================
-# 💰 Alpaca API
-# ============================================
-ALPACA_API_KEY=alpaca-demo-key
-ALPACA_API_SECRET=alpaca-demo-secret
-
-# ============================================
-# 💰 Tinkoff Invest API
-# ============================================
-TINKOFF_API_TOKEN=tinkoff-demo-token
-TINKOFF_ACCOUNT_ID=tinkoff-demo-account
-
-# ============================================
-# 🤖 Telegram Bot
-# ============================================
-TELEGRAM_BOT_TOKEN=1234567890:AAExampleBotTokenDemo123
-TELEGRAM_CHAT_ID=@barfinex_dev_channel
-
-# ============================================
-# 🌍 CORS and Origins
-# ============================================
-CORS_ORIGINS=https://studio.barfinex.example.com
-
-# ============================================
-# 🧰 Portainer (optional)
-# ============================================
-PONTEINER_CONTAINER_NAME=portainer
-PONTEINER_IMAGE=portainer/portainer-ce:latest
-PONTEINER_PORT=9000
-PONTEINER_HOST=portainer
-PONTEINER_ADMIN_USERNAME=admin
-PONTEINER_ADMIN_PASSWORD=Admin123!
-
-# ============================================
-# 🧭 Redis Commander (optional)
-# ============================================
-REDIS_COMMANDER_CONTAINER_NAME=redis_commander
-REDIS_COMMANDER_IMAGE=rediscommander/redis-commander:latest
-REDIS_COMMANDER_PORT=8102
-REDIS_COMMANDER_HOSTNAME=redis-commander
-REDIS_COMMANDER_REDIS_HOST=redis
-
-# ============================================
-# 💻 Mongo Express (optional)
-# ============================================
-MONGO_EXPRESS_CONTAINER_NAME=mongo-express
-MONGO_EXPRESS_IMAGE=mongo-express
-MONGO_EXPRESS_PORT=8103
+# QuestDB
+QUESTDB_HOST=questdb
+QUESTDB_PG_PORT=8812
+QUESTDB_ILP_PORT=9009
+QUESTDB_HTTP_PORT=9000
+QUESTDB_USER=admin
+QUESTDB_PASSWORD=quest
 ```
 
 ---
@@ -342,6 +254,15 @@ services:
     ports:
       - "6379:6379"
 
+  questdb:
+    image: questdb/questdb:latest
+    ports:
+      - "8812:8812"
+      - "9000:9000"
+      - "9009:9009"
+    volumes:
+      - ./data/questdb:/root/.questdb
+
   provider:
     image: ghcr.io/barfinex/provider:latest
     container_name: provider
@@ -375,11 +296,11 @@ This project is licensed under the **Apache License 2.0**
 with additional **non-commercial and attribution restrictions**.
 
 ### Terms
-1. Attribution to “Barfin Network Limited” and a link to [https://barfin.network/](https://barfin.network/).  
+1. Attribution to “Barfin Network Limited” and a link to [https://barfinex.com/](https://barfinex.com/).  
 2. Commercial usage requires explicit written permission.  
 3. Non-commercial redistributions must retain branding and links.
 
 For permissions and commercial partnerships:  
-📩 [https://barfin.network/](https://barfin.network/)
+📩 [https://barfinex.com/](https://barfinex.com/)
 
 ---

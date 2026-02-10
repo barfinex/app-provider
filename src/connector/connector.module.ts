@@ -1,30 +1,37 @@
 import { Module, forwardRef } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 
 import { ConnectorController } from './connector.controller';
 import { ConnectorService } from './connector.service';
 
-import { ConnectorEntity } from './connector.entity';
-import { DetectorEntity } from '../detector/detector.entity';
-import { SymbolEntity } from '../symbol/symbol.entity';
+import { ConnectorReadService } from './connector.read.service';
+import { ConnectorTradeService } from './connector.trade.service';
+import { ConnectorSubscriptionService } from './connector.subscription.service';
+import { ConnectorLifecycle } from './connector.lifecycle';
+import { ConnectorBuilder } from './connector.builder';
 
 import { DetectorModule } from '../detector/detector.module';
-import { CandleModule } from '../candle/candle.module'; // ⬅️ ДОБАВЛЕНО
-
-import { BinanceService, TinkoffService, AlpacaService, TestnetBinanceFuturesService, TestnetBinanceSpotService } from './datasource';
-import { WebSocketService } from './datasource/websocket.service';
-import { AccountService } from '../account/account.service';
+import { CandleModule } from '../candle/candle.module';
+import { AccountModule } from '../account/account.module';
 
 import { ConfigModule } from '@barfinex/config';
 import { KeyModule } from '@barfinex/key';
 
+import { SymbolRepository } from '../symbol/symbol.repository';
+
+import { QuestDBModule } from '../questdb/questdb.module';
+import { EventSinkModule } from '../questdb/event-sink/event-sink.module';
+import { QuestDbIlpModule } from '../questdb/ilp/questdb-ilp.module';
+
+import { BinanceModule } from './datasource/binance/binance.module';
+
 @Module({
   imports: [
     ConfigModule,
-    EventEmitterModule.forRoot(),
-    TypeOrmModule.forFeature([ConnectorEntity, DetectorEntity, SymbolEntity]),
+    KeyModule,
+    // EventEmitterModule.forRoot(),
+
     ClientsModule.register([
       {
         name: 'PROVIDER_SERVICE',
@@ -37,22 +44,44 @@ import { KeyModule } from '@barfinex/key';
         },
       },
     ]),
+
+    forwardRef(() => AccountModule),
     forwardRef(() => DetectorModule),
-    forwardRef(() => CandleModule), // ⬅️ ДОБАВЛЕНО: даёт CandleService в контексте
-    KeyModule,
+    // forwardRef(() => CandleModule),
+
+    // QuestDB stack
+    QuestDBModule,
+    QuestDbIlpModule,
+    EventSinkModule,
+
+    // Datasources
+    forwardRef(() => BinanceModule),
   ],
+
   controllers: [ConnectorController],
+
   providers: [
+    // Facade
     ConnectorService,
-    AccountService,
-    WebSocketService,
-    BinanceService,
-    AlpacaService,
-    TinkoffService,
-    TestnetBinanceFuturesService,
-    TestnetBinanceSpotService,
+
+    // Logic
+    ConnectorReadService,
+    ConnectorTradeService,
+    ConnectorSubscriptionService,
+    ConnectorLifecycle,
+    ConnectorBuilder,
+
+    // Repositories (ТОЛЬКО свои)
+    SymbolRepository,
   ],
-  // Если где-то снаружи инжектится BinanceService/др. источники — экспортни их:
-  exports: [ConnectorService, BinanceService, AlpacaService, TinkoffService, TestnetBinanceFuturesService, TestnetBinanceSpotService],
+
+  exports: [
+    ConnectorService,
+    ConnectorReadService,
+    ConnectorTradeService,
+    ConnectorSubscriptionService,
+    // ConnectorLifecycle,
+    ConnectorBuilder,
+  ],
 })
 export class ConnectorModule { }

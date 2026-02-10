@@ -1,24 +1,23 @@
-import { Module } from '@nestjs/common';
+// src/asset/asset.module.ts
+import { Module, forwardRef } from '@nestjs/common';
+
 import { AssetService } from './asset.service';
 import { AssetController } from './asset.controller';
-import { TypeOrmModule } from '@nestjs/typeorm';
-import { OrderEntity } from '../order/order.entity';
-import { DetectorEntity } from '../detector/detector.entity';
-// import { ConfigModule as NestConfigModule } from '@nestjs/config';
-// import { ConfigModule as CustomConfigModule } from '@barfinex/config';
-import { ConnectorEntity } from '../connector/connector.entity';
+
 import { ConnectorModule } from '../connector/connector.module';
 import { AccountModule } from '../account/account.module';
+import { OrderModule } from '../order/order.module';
+import { DetectorModule } from '../detector/detector.module';
 
 @Module({
     imports: [
-        // CustomConfigModule,
-        // NestConfigModule.forRoot(),
-        TypeOrmModule.forFeature([OrderEntity, DetectorEntity, ConnectorEntity]),
-        ConnectorModule,
-        AccountModule
+        forwardRef(() => ConnectorModule),
+        forwardRef(() => AccountModule),
+        forwardRef(() => OrderModule),
+        forwardRef(() => DetectorModule),
     ],
     controllers: [AssetController],
-    providers: [AssetService]
+    providers: [AssetService],
+    exports: [AssetService],
 })
 export class AssetModule { }

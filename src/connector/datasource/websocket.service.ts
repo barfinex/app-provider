@@ -21,9 +21,28 @@ export class WebSocketService {
     private readonly baseDelay = 5000; // 5s
 
     /**
-     * Подключение к конкретному WS-стриму
-     */
+ * Подключение к конкретному WS-стриму
+ */
     public async subscribeToStream(wsUrl: string): Promise<() => void> {
+
+        // =========================================================================
+        // 🔒 GUARD: не создаём второй WebSocket для того же wsUrl
+        // =========================================================================
+        const existing = this.sockets.get(wsUrl);
+        if (existing) {
+            const state = existing.ws?.readyState;
+
+            if (
+                state === WebSocket.OPEN ||
+                state === WebSocket.CONNECTING
+            ) {
+                this.logger.debug(
+                    `Reusing existing WebSocket for ${wsUrl} (state=${state})`,
+                );
+                return () => this.disconnect(wsUrl);
+            }
+        }
+
         const connectWebSocket = () => {
             this.logger.log(`Connecting to WebSocket at ${wsUrl}`);
             const ws = new WebSocket(wsUrl);
@@ -48,6 +67,7 @@ export class WebSocketService {
                 clearTimeout(timeout);
                 this.logger.log(`WebSocket connected: ${wsUrl}`);
                 socketInfo.retryCount = 0;
+                socketInfo.reconnecting = false; // 🔥 фикс состояния
 
                 // Запускаем ping каждые 30s
                 socketInfo.pingInterval = setInterval(() => {
@@ -108,6 +128,7 @@ export class WebSocketService {
                 this.sockets.delete(wsUrl);
 
                 if (!socketInfo.reconnecting) {
+                    socketInfo.reconnecting = true; // 🔥 ВАЖНО
                     this.attemptReconnect(wsUrl, socketInfo.callbacks, socketInfo.retryCount);
                 }
             });
@@ -117,6 +138,7 @@ export class WebSocketService {
 
         return () => this.disconnect(wsUrl);
     }
+
 
     /**
      * Подписка на входящие сообщения по конкретному стриму
@@ -193,7 +215,7 @@ export class WebSocketService {
                 const socketInfo: SocketInfo = {
                     ws: null as any, // заменится в subscribeToStream
                     retryCount: prevRetry + 1,
-                    reconnecting: false,
+                    reconnecting: true,
                     callbacks,
                 };
                 this.sockets.set(wsUrl, socketInfo);

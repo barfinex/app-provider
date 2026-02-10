@@ -1,20 +1,20 @@
-import { Column, Entity, ObjectId, ObjectIdColumn, CreateDateColumn, UpdateDateColumn } from "typeorm";
+// import { Column, Entity, ObjectId, ObjectIdColumn, CreateDateColumn, UpdateDateColumn } from "typeorm";
 
-@Entity()
-export class ConnectorEntity {
+// @Entity()
+// export class ConnectorEntity {
 
-    @ObjectIdColumn()
-    id!: ObjectId;
+//     @ObjectIdColumn()
+//     id!: ObjectId;
 
-    @Column()
-    connectorType!: string;
+//     @Column()
+//     connectorType!: string;
 
-    @Column()
-    options!: string;
+//     @Column()
+//     options!: string;
 
-    @CreateDateColumn({ type: 'timestamptz' })
-    created!: Date;
+//     @CreateDateColumn({ type: 'timestamptz' })
+//     created!: Date;
 
-    @UpdateDateColumn({ type: 'timestamptz' })
-    updated!: Date;
-}
+//     @UpdateDateColumn({ type: 'timestamptz' })
+//     updated!: Date;
+// }

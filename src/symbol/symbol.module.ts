@@ -1,24 +1,41 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
+
 import { SymbolService } from './symbol.service';
 import { SymbolController } from './symbol.controller';
-import { TypeOrmModule } from '@nestjs/typeorm';
-// import { OrderEntity } from '../order/order.entity';
-// import { DetectorEntity } from '../detector/detector.entity';
-// import { ConfigModule as NestConfigModule } from '@nestjs/config';
-// import { ConfigModule as CustomConfigModule } from '@barfinex/config';
-// import { ConnectorEntity } from '../connector/connector.entity';
+
+import { SymbolRepository } from './symbol.repository';
+import { SymbolEventAdapter } from '../questdb/event-sink/adapters/symbol.adapter';
+
 import { ConnectorModule } from '../connector/connector.module';
-// import { AccountModule } from '../account/account.module';
-import { SymbolEntity } from './symbol.entity';
+import { QuestDBModule } from '../questdb/questdb.module';
+import { EventSinkModule } from '../questdb/event-sink/event-sink.module';
+
+// ✅ Импортируем ILP-модуль
+import { QuestDbIlpModule } from '../questdb/ilp/questdb-ilp.module';
 
 @Module({
     imports: [
-        // CustomConfigModule,
-        // NestConfigModule.forRoot(),
-        TypeOrmModule.forFeature([SymbolEntity]),
         ConnectorModule,
+
+        // ОБЯЗАТЕЛЬНЫЕ МОДУЛИ
+        QuestDBModule,                    // → QuestDBQueryService
+        forwardRef(() => EventSinkModule), // → EventSinkRepository
+
+        // 🔥 ДОБАВЛЕНО: ILP Writer (QuestDbIlpWriterService)
+        QuestDbIlpModule,
     ],
+
     controllers: [SymbolController],
-    providers: [SymbolService]
+
+    providers: [
+        SymbolService,
+        SymbolRepository,
+        SymbolEventAdapter,
+    ],
+
+    exports: [
+        SymbolService,
+        SymbolRepository,
+    ],
 })
 export class SymbolModule { }

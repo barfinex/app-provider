@@ -1,24 +1,25 @@
-import { Module } from '@nestjs/common';
+// src/account/account.module.ts
+import { Module, forwardRef } from '@nestjs/common';
+
 import { AccountService } from './account.service';
 import { AccountController } from './account.controller';
-// import { OrderService } from '../order/order.service';
-import { TypeOrmModule } from '@nestjs/typeorm';
-import { OrderEntity } from '../order/order.entity';
-// import { ClientsModule, Transport } from '@nestjs/microservices';
-// import { ConfigModule as NestConfigModule } from '@nestjs/config';
-// import { ConfigModule as CustomConfigModule } from '@barfinex/config';
-import { DetectorEntity } from '../detector/detector.entity';
+
 import { ConnectorModule } from '../connector/connector.module';
+import { OrderModule } from '../order/order.module';     // чтобы AccountService мог закрывать/открывать ордера
+import { DetectorModule } from '../detector/detector.module'; // если нужны детекторы
+import { AccountLifecycle } from './account.lifecycle';
+import { BinanceModule } from
+    '../connector/datasource/binance/binance.module';
 
 @Module({
     imports: [
-        // CustomConfigModule,
-        // NestConfigModule.forRoot(),
-        TypeOrmModule.forFeature([OrderEntity, DetectorEntity]),
-        ConnectorModule
+        forwardRef(() => ConnectorModule),
+        forwardRef(() => OrderModule),
+        forwardRef(() => DetectorModule),
+        BinanceModule,
     ],
     controllers: [AccountController],
-    providers: [AccountService],
-    exports: [AccountService]
+    providers: [AccountService, AccountLifecycle],
+    exports: [AccountService],
 })
 export class AccountModule { }

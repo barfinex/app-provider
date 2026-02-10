@@ -1,28 +1,22 @@
+// src/inspector/inspector.module.ts
 import { Module, forwardRef } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { HttpModule } from '@nestjs/axios';
+
 import { InspectorController } from './inspector.controller';
-import { InspectorEntity } from './inspector.entity';
 import { InspectorService } from './inspector.service';
-import { ConnectorEntity } from '../connector/connector.entity';
-import { OrderEntity } from '../order/order.entity';
-// import { ConfigModule as NestConfigModule } from '@nestjs/config';
-// import { ConfigModule as CustomConfigModule } from '@barfinex/config';
+import { InspectorRepository } from './inspector.repository';
+
 import { ConnectorModule } from '../connector/connector.module';
 import { OrderModule } from '../order/order.module';
-import { HttpModule } from '@nestjs/axios';
 
 @Module({
     imports: [
-        // CustomConfigModule,
-        // NestConfigModule.forRoot(),
-        TypeOrmModule.forFeature([InspectorEntity, ConnectorEntity, OrderEntity]),
+        HttpModule,
         forwardRef(() => ConnectorModule),
         forwardRef(() => OrderModule),
-        HttpModule,
     ],
     controllers: [InspectorController],
-    providers: [InspectorService],
-    exports: [InspectorService]
+    providers: [InspectorService, InspectorRepository],
+    exports: [InspectorService, InspectorRepository],
 })
-
 export class InspectorModule { }

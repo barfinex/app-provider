@@ -55,7 +55,7 @@ async function bootstrap() {
 
   // 👇 Swagger
   const config = new DocumentBuilder()
-    .setTitle('Barfin.io Provider API')
+    .setTitle('Barfinex.com Provider API')
     .setDescription(
       'This allows seamless interaction with multiple trading platforms through connectors. ' +
       'It offers methods for authentication, market data retrieval, order placement and cancellation, ' +

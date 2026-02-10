@@ -1009,7 +1009,6 @@ export class TestnetBinanceSpotService implements OnModuleInit, DataSource {
     convertTimeFrame(interval: TimeFrame) {
         switch (interval) {
             case TimeFrame.min1: return CandleChartInterval.ONE_MINUTE;
-            case TimeFrame.min3: return CandleChartInterval.THREE_MINUTES;
             case TimeFrame.min5: return CandleChartInterval.FIVE_MINUTES;
             case TimeFrame.min15: return CandleChartInterval.FIFTEEN_MINUTES;
             case TimeFrame.min30: return CandleChartInterval.THIRTY_MINUTES;

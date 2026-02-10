@@ -189,19 +189,6 @@ export class DexGuruService implements OnModuleInit, DataSource {
 
     // }
 
-    // Преобразование TimeFrame в интервал DEX.guru
-    private convertTimeFrame(interval: TimeFrame): string {
-        switch (interval) {
-            case TimeFrame.min1: return '1m';
-            case TimeFrame.min5: return '5m';
-            case TimeFrame.min15: return '15m';
-            case TimeFrame.min30: return '30m';
-            case TimeFrame.h1: return '1h';
-            case TimeFrame.h4: return '4h';
-            case TimeFrame.day: return '1d';
-            default: throw new Error('Unsupported time frame');
-        }
-    }
 
     // Метод для подписки на ордербук
     public async subscribeToOrderBook(options: { marketType: MarketType, symbols: Symbol[] }, handler: OrderBookHandler) {

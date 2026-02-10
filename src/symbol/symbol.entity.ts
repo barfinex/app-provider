@@ -1,38 +1,38 @@
-import {
-    Entity,
-    Column,
-    CreateDateColumn,
-    UpdateDateColumn,
-    ObjectIdColumn,
-    ObjectId,
-} from 'typeorm';
+// import {
+//     Entity,
+//     Column,
+//     CreateDateColumn,
+//     UpdateDateColumn,
+//     ObjectIdColumn,
+//     ObjectId,
+// } from 'typeorm';
 
-@Entity()
-export class SymbolEntity {
-    @ObjectIdColumn()
-    id!: ObjectId; // ✅ Исправлено: ObjectId вместо number
+// @Entity()
+// export class SymbolEntity {
+//     @ObjectIdColumn()
+//     id!: ObjectId; // ✅ Исправлено: ObjectId вместо number
 
-    @Column()
-    baseAsset!: string;
+//     @Column()
+//     baseAsset!: string;
 
-    @Column()
-    quoteAsset!: string;
+//     @Column()
+//     quoteAsset!: string;
 
-    @Column()
-    symbol!: string;
+//     @Column()
+//     symbol!: string;
 
-    @Column()
-    status!: string;
+//     @Column()
+//     status!: string;
 
-    @Column()
-    connectorType!: string;
+//     @Column()
+//     connectorType!: string;
 
-    @Column()
-    marketType!: string;
+//     @Column()
+//     marketType!: string;
 
-    @UpdateDateColumn()
-    updatedAt!: Date;
+//     @UpdateDateColumn()
+//     updatedAt!: Date;
 
-    @CreateDateColumn()
-    createdAt!: Date;
-}
+//     @CreateDateColumn()
+//     createdAt!: Date;
+// }
