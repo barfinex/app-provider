@@ -1135,7 +1135,7 @@
 
 
 
-//                 case SubscriptionType.INSPECTOR_EVENT:
+//                 case SubscriptionType.INSPECTOR_RISK_LIMIT_BREACH:
 //                     break;
 //                 case SubscriptionType.PROVIDER_MARKETDATA_CANDLE:
 //                     const intervals =

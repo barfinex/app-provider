@@ -16,9 +16,14 @@ export class EventSinkController {
         @Query('from') from?: number,
         @Query('to') to?: number,
         @Query('search') search?: string,
+        @Query('includePayload') includePayload?: string,
     ) {
         page = Number(page);
         limit = Number(limit);
+        const withPayload =
+            String(includePayload ?? '')
+                .trim()
+                .toLowerCase() === 'true';
 
         const { data, total } = await this.repo.getPaginated({
             page,
@@ -28,6 +33,7 @@ export class EventSinkController {
             from: from ? Number(from) : undefined,
             to: to ? Number(to) : undefined,
             search,
+            includePayload: withPayload,
         });
 
         const paginator: PaginatorInfo = {

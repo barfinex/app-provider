@@ -11,8 +11,8 @@ const PARENT: Record<TimeFrame, TimeFrame | null> = {
     h1: TimeFrame.h2,
     h2: TimeFrame.h4,
     h4: TimeFrame.day,
-    day: TimeFrame.week,
-    week: TimeFrame.month,
+    day: null,
+    week: null,
     month: null,
 };
 

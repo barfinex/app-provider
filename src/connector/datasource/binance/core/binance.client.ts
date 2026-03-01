@@ -64,9 +64,12 @@ export class BinanceClientService {
                 );
             }
 
+            // Use futures server time so signed requests to fapi.binance.com stay within recvWindow.
+            // Spot (api.binance.com) and futures (fapi.binance.com) can differ slightly; using
+            // fapi time avoids -1021 "Timestamp outside recvWindow" on futures account/orders.
             const fetchBinanceTime = async (): Promise<number> => {
                 const res = await fetch(
-                    'https://api.binance.com/api/v3/time',
+                    'https://fapi.binance.com/fapi/v1/time',
                 );
                 const json = (await res.json()) as {
                     serverTime?: number;
@@ -85,7 +88,9 @@ export class BinanceClientService {
                 apiKey: connectorKey,
                 apiSecret: connectorSecret,
                 getTime: fetchBinanceTime,
-            });
+                // Allow 60s window for clock drift / latency (Binance max is 60000)
+                recvWindow: 60_000,
+            } as Parameters<typeof Binance>[0]);
 
             try {
                 const time = await this.api.time();

@@ -1,5 +1,12 @@
-import { Controller, Get, Param, Query } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
+import {
+    BadRequestException,
+    Controller,
+    Get,
+    NotFoundException,
+    Param,
+    Query,
+} from '@nestjs/common';
+import { ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
 
 import {
     ConnectorType,
@@ -23,6 +30,47 @@ export class CandleController {
     // 🔹 GET /candles/:connectorType/:marketType/:symbol/:interval
     // =========================================================================
     @Get(':connectorType/:marketType/:symbol/:interval')
+    @ApiParam({
+        name: 'connectorType',
+        required: true,
+        description: 'Connector type (for example: binance).',
+    })
+    @ApiParam({
+        name: 'marketType',
+        required: true,
+        description: 'Market type (for example: spot, futures).',
+    })
+    @ApiParam({
+        name: 'symbol',
+        required: true,
+        description: 'Trading symbol (for example: BTCUSDT).',
+    })
+    @ApiParam({
+        name: 'interval',
+        required: true,
+        description: 'Timeframe (for example: min1, min5, h1, day).',
+    })
+    @ApiQuery({
+        name: 'from',
+        required: false,
+        type: String,
+        description:
+            'Range start. Supports unix timestamp in milliseconds (e.g. 1771804800000) or ISO-8601 datetime (e.g. 2026-02-23T00:00:00Z).',
+    })
+    @ApiQuery({
+        name: 'to',
+        required: false,
+        type: String,
+        description:
+            'Range end / anchor. Supports unix timestamp in milliseconds (e.g. 1771808400000) or ISO-8601 datetime (e.g. 2026-02-23T01:00:00Z).',
+    })
+    @ApiQuery({
+        name: 'days',
+        required: false,
+        type: Number,
+        description:
+            'Optional lookback window in days when "from" is not provided. Must be a non-negative number.',
+    })
     async getCandles(
         @Param('connectorType') connectorType: ConnectorType,
         @Param('marketType') marketType: MarketType,
@@ -35,6 +83,9 @@ export class CandleController {
     ) {
         // 🔐 ЕДИНСТВЕННАЯ точка нормализации таймфрейма
         const interval = toDomainInterval(intervalRaw) as TimeFrame;
+        const fromTsInput = this.parseTimestampQueryParam(from, 'from');
+        const toTsInput = this.parseTimestampQueryParam(to, 'to');
+        const daysInput = this.parseDaysQueryParam(days);
 
         let anchorTs: number | null;
 
@@ -43,8 +94,8 @@ export class CandleController {
         // ---------------------------------------------------------------------
 
         // 1️⃣ Явно передан `to`
-        if (to) {
-            anchorTs = Number(to);
+        if (toTsInput !== null) {
+            anchorTs = toTsInput;
         }
 
         // 3️⃣ Initial load → last ts from DB
@@ -57,12 +108,8 @@ export class CandleController {
             });
         }
 
-
-        console.log("anchorTs:", anchorTs);
-
-
         if (!anchorTs || !Number.isFinite(anchorTs)) {
-            throw new Error(
+            throw new NotFoundException(
                 `No candles found for ${symbol} ${connectorType} ${marketType} ${interval}`
             );
         }
@@ -73,15 +120,10 @@ export class CandleController {
         const { fromTs, toTs } = this.resolveRange(
             interval,
             anchorTs,
-            from,
-            to,
-            days,
+            fromTsInput,
+            toTsInput,
+            daysInput,
         );
-
-
-        console.log("fromTs:", fromTs);
-        console.log("toTs:", toTs);
-
 
         if (fromTs === null) {
             return [];
@@ -121,28 +163,40 @@ export class CandleController {
     private resolveRange(
         interval: TimeFrame,
         anchorTs: number,
-        from?: string,
-        to?: string,
-        days?: string,
+        fromTsInput?: number | null,
+        toTsInput?: number | null,
+        daysInput?: number | null,
     ): { fromTs: number | null; toTs: number } {
 
         // ✅ ПРАВАЯ ГРАНИЦА ВСЕГДА = anchorTs (если явно не передали to)
-        const toTs = to
-            ? Number(to)
+        const toTs = toTsInput !== null && toTsInput !== undefined
+            ? toTsInput
             : anchorTs;
 
         let fromTs: number;
 
-        if (from) {
-            fromTs = Number(from);
-        } else if (days) {
-            fromTs = toTs - Number(days) * 24 * 60 * 60 * 1000;
+        if (fromTsInput !== null && fromTsInput !== undefined) {
+            fromTs = fromTsInput;
+        } else if (daysInput !== null && daysInput !== undefined) {
+            fromTs = toTs - daysInput * 24 * 60 * 60 * 1000;
         } else {
             // дефолтные окна
             fromTs =
                 interval === TimeFrame.min1
                     ? toTs - 6 * 60 * 60 * 1000       // 6 часов
                     : toTs - 7 * 24 * 60 * 60 * 1000; // 7 дней
+        }
+
+        if (!Number.isFinite(toTs)) {
+            throw new BadRequestException(
+                'Invalid query parameter "to". Expected unix timestamp in milliseconds or ISO-8601 datetime.',
+            );
+        }
+
+        if (fromTs > toTs) {
+            throw new BadRequestException(
+                'Invalid range: "from" must be less than or equal to "to".',
+            );
         }
 
         if (!Number.isFinite(fromTs) || fromTs > toTs) {
@@ -152,4 +206,41 @@ export class CandleController {
         return { fromTs, toTs };
     }
 
+    private parseTimestampQueryParam(
+        value: string | undefined,
+        paramName: 'from' | 'to',
+    ): number | null {
+        if (value == null || value.trim() === '') {
+            return null;
+        }
+
+        const trimmed = value.trim();
+        const asNumber = Number(trimmed);
+        if (Number.isFinite(asNumber)) {
+            return asNumber;
+        }
+
+        const parsed = Date.parse(trimmed);
+        if (Number.isFinite(parsed)) {
+            return parsed;
+        }
+
+        throw new BadRequestException(
+            `Invalid query parameter "${paramName}". Expected unix timestamp in milliseconds or ISO-8601 datetime.`,
+        );
+    }
+
+    private parseDaysQueryParam(value: string | undefined): number | null {
+        if (value == null || value.trim() === '') {
+            return null;
+        }
+
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed) || parsed < 0) {
+            throw new BadRequestException(
+                'Invalid query parameter "days". Expected a non-negative number.',
+            );
+        }
+        return parsed;
+    }
 }

@@ -1,3 +1,7 @@
+# Приложения. Инфраструктура (QuestDB, Redis и т.д.) — в docker-compose-infra.yml.
+# Сначала: docker compose -f docker-compose-infra.yml up -d
+# Затем:   docker compose up -d
+
 services:
   provider:
     container_name: ${PROVIDER_CONTAINER_NAME}
@@ -7,7 +11,6 @@ services:
     env_file:
       - .env
     environment:
-      # - MONGO_HOST=${MONGO_HOST}
       - REDIS_HOST=${REDIS_HOST}
       - NODE_ENV=production
       - NODE_OPTIONS=--max-old-space-size=4096
@@ -15,8 +18,6 @@ services:
       - BINANCE_API_SECRET=${BINANCE_API_SECRET}
       - TESTNET_BINANCE_SPOT_KEY=${TESTNET_BINANCE_SPOT_KEY}
       - TESTNET_BINANCE_SPOT_SECRET=${TESTNET_BINANCE_SPOT_SECRET}
-
-      # ⚡ QuestDB connection
       - QUESTDB_HOST=${QUESTDB_HOST}
       - QUESTDB_PG_PORT=${QUESTDB_PG_PORT}
       - QUESTDB_ILP_PORT=${QUESTDB_ILP_PORT}
@@ -27,133 +28,23 @@ services:
     ports:
       - "${PROVIDER_API_PORT}:${PROVIDER_API_PORT}"
     networks:
-      - barfinapp-network
-    depends_on:
-      - redis
-      # - mongo
-      - questdb
+      - barfinex-network
     stdin_open: true
     tty: true
 
     volumes:
-      # 🔧 Основные конфиги
       - ./docker-config/config.json:/usr/src/app/config.json:ro
       - ./docker-config/config.provider.json:/usr/src/app/config.provider.json:ro
       - ./docker-config/config.advisor.json:/usr/src/app/config.advisor.json:ro
       - ./docker-config/config.detector.json:/usr/src/app/config.detector.json:ro
       - ./docker-config/config.inspector.json:/usr/src/app/config.inspector.json:ro
       - ./docker-config:/usr/src/app/config:ro
-
-      # 🔐 SSL-сертификаты (mkcert)
       - ./cert/localhost+2-key.pem:/usr/src/app/cert/localhost+2-key.pem:ro
       - ./cert/localhost+2.pem:/usr/src/app/cert/localhost+2.pem:ro
-
       - ./data/keys:/usr/src/app/.keys
-
-      # 🕒 Синхронизация времени (опционально)
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
 
-  # =======================================
-  # ⚡ QuestDB — быстрые тики/свечи/ивенты
-  # =======================================
-  questdb:
-    container_name: ${QUESTDB_CONTAINER_NAME}
-    image: ${QUESTDB_IMAGE}
-    restart: always
-    ports:
-      - "${QUESTDB_PG_PORT}:8812" # PostgreSQL Wire Protocol (SELECT)
-      - "${QUESTDB_HTTP_PORT}:9000" # Web UI + REST API
-      - "${QUESTDB_ILP_PORT}:9009" # ILP ingest (мгновенная запись)
-    networks:
-      - barfinapp-network
-    environment:
-      QDB_PG_USER: ${QUESTDB_USER}
-      QDB_PG_PASSWORD: ${QUESTDB_PASSWORD}
-    volumes:
-      - ./data/questdb:/root/.questdb
-
-  # mongo:
-  #   container_name: ${MONGO_CONTAINER_NAME}
-  #   image: ${MONGO_IMAGE}
-  #   restart: always
-  #   ports:
-  #     - "${MONGO_PORT}:${MONGO_PORT}"
-  #   volumes:
-  #     - ./data/mongo:/data/db
-  #     - ./docker-config/mongo-init-db.js:/docker-entrypoint-initdb.d/init-db.js:ro
-  #   networks:
-  #     - barfinapp-network
-
-  # mongo-express:
-  #   container_name: ${MONGO_EXPRESS_CONTAINER_NAME}
-  #   image: ${MONGO_EXPRESS_IMAGE}
-  #   restart: always
-  #   ports:
-  #     - "${MONGO_EXPRESS_PORT}:8081"
-  #   environment:
-  #     ME_CONFIG_BASICAUTH_USERNAME: ${MONGO_ROOT_USERNAME}
-  #     ME_CONFIG_BASICAUTH_PASSWORD: ${MONGO_ROOT_PASSWORD}
-  #     ME_CONFIG_MONGODB_SERVER: ${MONGO_CONTAINER_NAME}
-  #   depends_on:
-  #     - mongo
-  #   networks:
-  #     - barfinapp-network
-
-  redis:
-    container_name: ${REDIS_CONTAINER_NAME}
-    image: ${REDIS_IMAGE}
-    restart: always
-    ports:
-      - "${REDIS_PORT}:${REDIS_PORT}"
-    networks:
-      - barfinapp-network
-
-  redis-commander:
-    container_name: ${REDIS_COMMANDER_CONTAINER_NAME}
-    image: ${REDIS_COMMANDER_IMAGE}
-    restart: always
-    ports:
-      - "${REDIS_COMMANDER_PORT}:${REDIS_COMMANDER_PORT}"
-    hostname: ${REDIS_COMMANDER_HOSTNAME}
-    networks:
-      - barfinapp-network
-    environment:
-      - PORT=${REDIS_COMMANDER_PORT}
-      - REDIS_HOSTS=local:${REDIS_COMMANDER_REDIS_HOST}:${REDIS_PORT}
-
-  portainer:
-    container_name: ${PONTEINER_CONTAINER_NAME}
-    image: ${PONTEINER_IMAGE}
-    restart: always
-    ports:
-      - "${PONTEINER_PORT}:9000"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./data/portainer:/data
-    networks:
-      - barfinapp-network
-    environment:
-      - ADMIN_USERNAME=${PONTEINER_ADMIN_USERNAME}
-      - ADMIN_PASSWORD=${PONTEINER_ADMIN_PASSWORD}
-  # postgres:
-  #   container_name: postgres
-  #   image: postgres:15
-  #   restart: always
-  #   environment:
-  #     POSTGRES_USER: ${DB_USERNAME}
-  #     POSTGRES_PASSWORD: ${DB_PASSWORD}
-  #     POSTGRES_DB: ${DB_NAME}
-  #   ports:
-  #     - "${DB_PORT}:5432"
-  #   volumes:
-  #     - ./data/postgres:/var/lib/postgresql/data
-  #   networks:
-  #     - barfinapp-network
-
-  # ===============================
-  # Networks
-  # ===============================
 networks:
-  barfinapp-network:
-    driver: bridge
+  barfinex-network:
+    external: true

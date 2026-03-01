@@ -12,7 +12,9 @@ import {
     MarketType,
     TimeFrame,
     Symbol,
+    ALL_CANDLE_INTERVALS,
 } from '@barfinex/types';
+import { ConfigService } from '@barfinex/config';
 
 import { ConnectorRegistry } from './connector.registry';
 import { ConnectorBuilder } from './connector.builder';
@@ -40,6 +42,7 @@ export class ConnectorLifecycle
 
         private readonly builder: ConnectorBuilder,
         private readonly subscriptionService: ConnectorSubscriptionService,
+        private readonly configService: ConfigService,
     ) { }
 
     // =========================================================================
@@ -94,9 +97,13 @@ export class ConnectorLifecycle
             });
 
             // =========================================================================
-            // 4) ИНТЕРВАЛЫ
+            // 4) ИНТЕРВАЛЫ (из конфига candleSync.intervals или все по умолчанию)
             // =========================================================================
-            const intervals: TimeFrame[] = [TimeFrame.min1];
+            const fromConfig = this.configService.getConfig()?.provider?.candleSync?.intervals;
+            const intervals: TimeFrame[] =
+                Array.isArray(fromConfig) && fromConfig.length > 0
+                    ? (fromConfig as TimeFrame[])
+                    : [...ALL_CANDLE_INTERVALS];
             this.logger.debug(`Intervals: ${intervals.join(', ')}`);
 
             // =========================================================================
@@ -200,7 +207,7 @@ export class ConnectorLifecycle
                                 .join(', ')}`,
                         );
 
-                        this.subscriptionService.updateSubscribeCollection(
+                        await this.subscriptionService.updateSubscribeCollection(
                             connector.connectorType,
                             market.marketType,
                             symbols,

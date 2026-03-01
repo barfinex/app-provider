@@ -1,17 +1,20 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { TimeFrame } from '@barfinex/types';
 
 import { CandleCacheService, LiveCandle } from './candle-cache.service';
 import { CandleAggregatorService } from './candle-aggregator.service';
 import { CandleWriterService } from './candle-writer.service';
+import { DerivedCandleService } from './derived/derived-candle.service';
 
 @Injectable()
 export class CandleEngineService {
+    private readonly logger = new Logger(CandleEngineService.name);
 
     constructor(
         private readonly cache: CandleCacheService,
         private readonly aggregator: CandleAggregatorService,
         private readonly writer: CandleWriterService,
+        private readonly derivedCandleService: DerivedCandleService,
     ) { }
 
     /**
@@ -62,6 +65,20 @@ export class CandleEngineService {
                     connectorType,
                     marketType
                 );
+                if (item.tf === TimeFrame.day) {
+                    this.derivedCandleService
+                        .recomputeAffectedFromDailyClose({
+                            symbol,
+                            connectorType,
+                            marketType,
+                            dayTsMs: item.candle.start,
+                        })
+                        .catch((err) => {
+                            this.logger.warn(
+                                `[DERIVED] failed to recompute week/month for ${symbol}: ${err instanceof Error ? err.message : String(err)}`,
+                            );
+                        });
+                }
             }
         }
     }

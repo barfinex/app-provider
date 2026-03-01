@@ -8,10 +8,14 @@ import { InspectorRepository } from './inspector.repository';
 
 import { ConnectorModule } from '../connector/connector.module';
 import { OrderModule } from '../order/order.module';
+import { QuestDBModule } from '../questdb/questdb.module';
+import { EventSinkModule } from '../questdb/event-sink/event-sink.module';
 
 @Module({
     imports: [
         HttpModule,
+        QuestDBModule,
+        forwardRef(() => EventSinkModule),
         forwardRef(() => ConnectorModule),
         forwardRef(() => OrderModule),
     ],

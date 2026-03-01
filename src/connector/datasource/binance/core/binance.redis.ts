@@ -56,7 +56,7 @@ export class BinanceRedisService implements OnModuleInit {
         if (!this.isEmitToRedisEnabled) return;
 
         if (!this.client) {
-            this.logger.error('❌ Redis client is not initialized');
+            // Nest may run subscribers before this service's onModuleInit; skip emit until connected
             return;
         }
 

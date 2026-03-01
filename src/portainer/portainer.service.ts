@@ -1,4 +1,10 @@
-import { Injectable, Logger, HttpException, HttpStatus } from '@nestjs/common';
+import {
+    Injectable,
+    Logger,
+    HttpException,
+    HttpStatus,
+    ServiceUnavailableException,
+} from '@nestjs/common';
 import axios, { AxiosError } from 'axios';
 import { decode } from 'jsonwebtoken';
 import { PortainerContainer } from './portainer.interface';
@@ -6,11 +12,25 @@ import { PortainerContainer } from './portainer.interface';
 @Injectable()
 export class PortainerService {
     private readonly logger = new Logger(PortainerService.name);
-    private readonly baseUrl = `http://${process.env.PONTEINER_HOST}:${process.env.PONTEINER_PORT}/api`;
+    private readonly host =
+        process.env.PORTAINER_HOST || process.env.PONTEINER_HOST || '';
+    private readonly port =
+        process.env.PORTAINER_PORT || process.env.PONTEINER_PORT || '';
+    private readonly baseUrl = `http://${this.host}:${this.port}/api`;
     private token: string | null = null;
 
-    private readonly username = process.env.PONTEINER_ADMIN_USERNAME;
-    private readonly password = process.env.PONTEINER_ADMIN_PASSWORD;
+    private readonly username =
+        process.env.PORTAINER_ADMIN_USERNAME || process.env.PONTEINER_ADMIN_USERNAME;
+    private readonly password =
+        process.env.PORTAINER_ADMIN_PASSWORD || process.env.PONTEINER_ADMIN_PASSWORD;
+    private readonly requestTimeoutMs = Number(process.env.PORTAINER_TIMEOUT_MS || 5000);
+    private readonly authCooldownMs = Number(
+        process.env.PORTAINER_AUTH_RETRY_COOLDOWN_MS || 30000,
+    );
+
+    private authInFlight: Promise<void> | null = null;
+    private authBackoffUntil = 0;
+    private missingConfigLogged = false;
 
     /**
      * Проверка, истек ли токен
@@ -33,16 +53,21 @@ export class PortainerService {
      * Аутентификация с Portainer API
      */
     private async authenticate(): Promise<void> {
-        if (!this.username || !this.password) {
-            const msg = 'Portainer admin credentials are not set in environment variables';
-            this.logger.error(msg);
-            throw new HttpException(msg, HttpStatus.INTERNAL_SERVER_ERROR);
+        if (!this.isConfigured()) {
+            const msg = 'Portainer integration is not configured (host/port/credentials missing)';
+            if (!this.missingConfigLogged) {
+                this.logger.warn(msg);
+                this.missingConfigLogged = true;
+            }
+            throw new ServiceUnavailableException(msg);
         }
 
         try {
             const response = await axios.post<{ jwt: string }>(`${this.baseUrl}/auth`, {
                 Username: this.username,
                 Password: this.password,
+            }, {
+                timeout: this.requestTimeoutMs,
             });
 
             if (response.data?.jwt) {
@@ -55,6 +80,7 @@ export class PortainerService {
             const err = error as AxiosError<{ message?: string }>;
             const message = err.response?.data?.message || err.message || 'Authentication error';
             this.logger.error(`Authentication error: ${message}`);
+            this.authBackoffUntil = Date.now() + this.authCooldownMs;
             throw new HttpException(message, HttpStatus.UNAUTHORIZED);
         }
     }
@@ -63,9 +89,22 @@ export class PortainerService {
      * Проверка и обновление токена
      */
     private async ensureAuthenticated(): Promise<void> {
+        const now = Date.now();
+        if (this.authBackoffUntil > now) {
+            const waitMs = this.authBackoffUntil - now;
+            throw new ServiceUnavailableException(
+                `Portainer authentication is in cooldown. Retry in ${waitMs} ms.`,
+            );
+        }
+
         if (!this.token || this.isTokenExpired(this.token)) {
             this.logger.warn('Token is missing or expired. Authenticating...');
-            await this.authenticate();
+            if (!this.authInFlight) {
+                this.authInFlight = this.authenticate().finally(() => {
+                    this.authInFlight = null;
+                });
+            }
+            await this.authInFlight;
         }
     }
 
@@ -78,10 +117,14 @@ export class PortainerService {
         try {
             const response = await axios.get<T>(url, {
                 headers: { Authorization: `Bearer ${this.token}` },
+                timeout: this.requestTimeoutMs,
             });
             return response.data;
         } catch (error: unknown) {
             const err = error as AxiosError<{ message?: string }>;
+            if (err.response?.status === 401) {
+                this.token = null;
+            }
             const message = err.response?.data?.message || err.message || `Failed to fetch ${resourceName}`;
             const status = err.response?.status || HttpStatus.BAD_REQUEST;
 
@@ -90,29 +133,42 @@ export class PortainerService {
         }
     }
 
+    private isConfigured(): boolean {
+        return Boolean(this.host && this.port && this.username && this.password);
+    }
+
     /**
      * Получение всех контейнеров Portainer
      */
     async getContainers(): Promise<PortainerContainer[]> {
         const endpointName = 'local';
-        const endpoints = await this.fetchPortainerResource<any[]>(`${this.baseUrl}/endpoints`, 'endpoints');
+        try {
+            const endpoints = await this.fetchPortainerResource<any[]>(
+                `${this.baseUrl}/endpoints`,
+                'endpoints',
+            );
 
-        const targetEndpoint = endpoints.find((endpoint) => endpoint.Name === endpointName);
-        if (!targetEndpoint) {
-            throw new HttpException(`Endpoint "${endpointName}" not found.`, HttpStatus.NOT_FOUND);
+            const targetEndpoint = endpoints.find((endpoint) => endpoint.Name === endpointName);
+            if (!targetEndpoint) {
+                this.logger.warn(`Endpoint "${endpointName}" not found in Portainer.`);
+                return [];
+            }
+
+            const endpointId = targetEndpoint.Id;
+            const containers = await this.fetchPortainerResource<PortainerContainer[]>(
+                `${this.baseUrl}/endpoints/${endpointId}/docker/containers/json`,
+                `containers for endpoint-${endpointId}`,
+            );
+
+            return containers ?? [];
+        } catch (error: unknown) {
+            const message =
+                error instanceof Error
+                    ? error.message
+                    : 'Portainer is temporarily unavailable';
+            this.logger.warn(`Returning empty containers list: ${message}`);
+            return [];
         }
-
-        const endpointId = targetEndpoint.Id;
-        const containers = await this.fetchPortainerResource<PortainerContainer[]>(
-            `${this.baseUrl}/endpoints/${endpointId}/docker/containers/json`,
-            `containers for endpoint-${endpointId}`,
-        );
-
-        if (!containers.length) {
-            throw new HttpException(`No containers found for endpoint ${endpointId}.`, HttpStatus.NOT_FOUND);
-        }
-
-        return containers;
     }
 
     /**

@@ -47,7 +47,8 @@ export class DetectorRepository {
     // -------------------------------------------------
     async find(): Promise<DetectorEntity[]> {
         const rows = await this.reader.queryAsObjects(`
-            SELECT *
+            SELECT key, name, options, status,
+                   created AS "createdAt", updated AS "updatedAt", deletedAt
             FROM detectors
             WHERE status = 'active'
             ORDER BY name
@@ -63,7 +64,8 @@ export class DetectorRepository {
         const { key, name } = options.where;
 
         let sql = `
-            SELECT *
+            SELECT key, name, options, status,
+                   created AS "createdAt", updated AS "updatedAt", deletedAt
             FROM detectors
         `;
 
@@ -125,14 +127,14 @@ export class DetectorRepository {
     // -------------------------------------------------
     async insert(entity: DetectorEntity): Promise<void> {
         await this.reader.query(`
-            INSERT INTO detectors (key, name, options, status, createdAt, updatedAt, deletedAt)
+            INSERT INTO detectors (key, name, options, status, created, updated, deletedAt)
             VALUES (
                 '${this.esc(entity.key)}',
                 '${this.esc(entity.name)}',
                 '${this.esc(JSON.stringify(entity.options))}',
                 'active',
-                ${entity.createdAt},
-                ${entity.updatedAt},
+                ${entity.createdAt * 1000}::timestamp,
+                ${entity.updatedAt * 1000}::timestamp,
                 null
             )
         `);
@@ -149,17 +151,25 @@ export class DetectorRepository {
     // UPDATE
     // -------------------------------------------------
     async update(key: string, patch: Partial<DetectorEntity>): Promise<void> {
+        // QuestDB: do not UPDATE designated timestamp column (updated)
+        const skipColumns = new Set(['updatedAt', 'updated']);
+        const col = (field: string) => (field === 'createdAt' ? 'created' : field === 'updatedAt' ? 'updated' : field);
         const sets = Object.entries(patch)
+            .filter(([field]) => !skipColumns.has(field) && !skipColumns.has(col(field)))
             .map(([field, value]) => {
                 if (value === undefined) return null;
 
+                const column = col(field);
                 if (field === 'options') {
-                    return `${field}='${this.esc(JSON.stringify(value))}'`;
+                    return `${column}='${this.esc(JSON.stringify(value))}'`;
                 }
                 if (typeof value === 'string') {
-                    return `${field}='${this.esc(value)}'`;
+                    return `${column}='${this.esc(value)}'`;
                 }
-                return `${field}=${value}`;
+                if (field === 'createdAt') {
+                    return `${column}=${value * 1000}::timestamp`;
+                }
+                return `${column}=${value}`;
             })
             .filter(Boolean)
             .join(',');
@@ -184,11 +194,11 @@ export class DetectorRepository {
     async delete(key: string): Promise<void> {
         const escapedKey = this.esc(key);
 
+        // QuestDB: do not SET designated timestamp column (updated)
         const sql = `
             UPDATE detectors
             SET status='deleted',
-                deletedAt=now(),
-                updatedAt=now()
+                deletedAt=now()
             WHERE key='${escapedKey}'
         `;
 

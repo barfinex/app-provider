@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule as NestConfigModule } from '@nestjs/config';
 import { ConfigModule as CustomConfigModule } from '@barfinex/config';
 
@@ -24,10 +25,18 @@ import { EventSinkModule } from './questdb/event-sink/event-sink.module';
 import { OrderBookSamplingModule } from './questdb/orderbook-sampling/orderbook-sampling.module';
 
 import { ReplayModule } from './replay/replay.module';
+import { SignalsModule } from './signals/signals.module';
+import { ProxyModule } from './proxy/proxy.module';
+import { AppRegistryModule } from './app-registry/app-registry.module';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { ScheduleModule } from '@nestjs/schedule';
+import { WsEventsModule } from './ws-events/ws-events.module';
+import { DashboardModule } from './dashboard/dashboard.module';
+import { ProviderApiTokenGuard } from './auth/provider-api-token.guard';
 
 @Module({
   imports: [
+    ScheduleModule.forRoot(),
     CustomConfigModule,
     NestConfigModule.forRoot({
       envFilePath:
@@ -70,6 +79,11 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
     AccountModule,
     AssetModule,
     SymbolModule,
+    SignalsModule,
+    AppRegistryModule,
+    ProxyModule,
+    WsEventsModule,
+    DashboardModule,
     OrderModule,
     ConnectorModule,
     SubscriptionModule,
@@ -77,6 +91,12 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
   ],
 
   controllers: [AppController],
-  providers: [WsHealthGateway],
+  providers: [
+    WsHealthGateway,
+    {
+      provide: APP_GUARD,
+      useClass: ProviderApiTokenGuard,
+    },
+  ],
 })
 export class AppModule { }

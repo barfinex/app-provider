@@ -6,6 +6,9 @@
   "include": [
     "src"
   ],
+  "exclude": [
+    "src/mcp"
+  ],
   "references": [
     {
       "path": "../../libs/types"
@@ -14,13 +17,31 @@
       "path": "../../libs/utils"
     },
     {
+      "path": "../../libs/plugin-driver"
+    },
+    {
+      "path": "../../libs/connectors"
+    },
+    {
+      "path": "../../libs/orders"
+    },
+    {
       "path": "../../libs/key"
     },
     {
       "path": "../../libs/config"
     },
     {
+      "path": "../../libs/telegram"
+    },
+    {
+      "path": "../../libs/detector"
+    },
+    {
       "path": "../../libs/provider-ws-bridge"
+    },
+    {
+      "path": "../../libs/provider-mcp"
     }
   ]
 }

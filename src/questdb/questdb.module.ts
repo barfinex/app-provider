@@ -42,6 +42,7 @@ import { EventSinkModule } from './event-sink/event-sink.module';
     exports: [
         QuestDBWriteService,
         QuestDBQueryService,
+        QuestDBDDLService,
 
         CandleRepository,
         TradeRepository,

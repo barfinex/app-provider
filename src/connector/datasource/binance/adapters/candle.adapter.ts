@@ -7,6 +7,7 @@ import {
     ConnectorType,
 } from '@barfinex/types';
 import { CandleService } from '../../../../candle/candle.service';
+import { isInvalidOhlc } from '../../../../candle/candle-validation';
 import { Logger } from '@nestjs/common';
 
 export interface CandleAdapterDeps {
@@ -78,6 +79,14 @@ export function createCandleAdapter(deps: CandleAdapterDeps) {
             ) {
                 logger.warn(
                     `[candleAdapter] invalid numbers: symbol=${symbol} market=${marketType} interval=${interval}`,
+                );
+                return;
+            }
+
+            // нули в OHLC не записываем и не эмитим
+            if (isInvalidOhlc({ open, high, low, close })) {
+                logger.warn(
+                    `[candleAdapter] skip zero/invalid OHLC: symbol=${symbol} ts=${startTime} o=${open} h=${high} l=${low} c=${close}`,
                 );
                 return;
             }

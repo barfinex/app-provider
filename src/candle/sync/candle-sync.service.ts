@@ -1,0 +1,608 @@
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { OnEvent } from '@nestjs/event-emitter';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import { ConnectorType, MarketType, Symbol, TimeFrame } from '@barfinex/types';
+import { ConfigService } from '@barfinex/config';
+
+import { HistoryLoaderService } from '../history/history-loader.service';
+import { SymbolHistoryService } from '../history/symbol-history.service';
+import { CandleQueryService } from '../candle-query.service';
+import { RequestFactoryService } from '../providers/request-factory.service';
+import { CandleWarmupGateService } from '../warmup/candle-warmup-gate.service';
+import { QuestDBDDLService } from '../../questdb/questdb-ddl.service';
+import { QuestDBQueryService } from '../../questdb/questdb-query.service';
+import { DAY, ms } from '../time/time.utils';
+import { CANDLE_SUBSCRIPTIONS_UPDATED } from '../../common/constants';
+import { DerivedCandleService } from '../derived/derived-candle.service';
+
+/** Payload when connector subscription set is updated (startup or dynamic add). */
+export { CANDLE_SUBSCRIPTIONS_UPDATED };
+
+export interface CandleSubscriptionsUpdatedPayload {
+  connectorType: ConnectorType;
+  marketType: MarketType;
+  symbols: Symbol[];
+  intervals: TimeFrame[];
+}
+
+interface StoredSubscription {
+  connectorType: ConnectorType;
+  marketType: MarketType;
+  symbols: Symbol[];
+  intervals: TimeFrame[];
+}
+
+interface WarmupLogMeta {
+  opId: string;
+  ctx: {
+    symbol: string;
+    tf: TimeFrame;
+    connectorType: string;
+    marketType: string;
+  };
+}
+
+type LookbackDaysConfig = Partial<Record<TimeFrame, number>>;
+
+@Injectable()
+export class CandleSyncService implements OnModuleInit {
+  private readonly logger = new Logger(CandleSyncService.name);
+  private readonly candleVerbose = process.env.CANDLE_VERBOSE_LOGS === 'true';
+  private readonly warmupVerbose = this.candleVerbose;
+  private readonly warmupIntervalLogs = this.candleVerbose;
+  private readonly backfillVerbose = this.candleVerbose;
+  private readonly derivedVerbose = this.candleVerbose;
+  private static readonly DEFAULT_LOOKBACK_DAYS: Record<TimeFrame, number> = {
+    [TimeFrame.min1]: 30,
+    [TimeFrame.min5]: 90,
+    [TimeFrame.min15]: 90,
+    [TimeFrame.min30]: 90,
+    [TimeFrame.h1]: 120,
+    [TimeFrame.h2]: 120,
+    [TimeFrame.h4]: 120,
+    [TimeFrame.day]: 540,
+    [TimeFrame.week]: 540,
+    [TimeFrame.month]: 540,
+  };
+
+  /** connectorType:marketType -> subscription set */
+  private readonly state = new Map<string, StoredSubscription>();
+
+  /** Очистка истории выполняется один раз за запуск. */
+  private hasTruncatedThisRun = false;
+  private hasCleanedUnreasonableTsThisRun = false;
+
+  /**
+   * Warmup guard:
+   * - не запускаем backfill пока идёт warmup
+   * - не запускаем 2 warmup одновременно на один и тот же key
+   */
+  private readonly warmupRunningKeys = new Set<string>();
+  private readonly warmupQueuedKeys = new Set<string>();
+
+  /** 🔒 Глобальный lock — только один warmup во всей системе одновременно */
+  private warmupGlobalRunning = false;
+
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly historyLoader: HistoryLoaderService,
+    private readonly symbolHistory: SymbolHistoryService,
+    private readonly candleQuery: CandleQueryService,
+    private readonly requestFactory: RequestFactoryService,
+    private readonly warmupGate: CandleWarmupGateService,
+    private readonly ddlService: QuestDBDDLService,
+    private readonly questDbQueryService: QuestDBQueryService,
+    private readonly derivedCandleService: DerivedCandleService,
+  ) {}
+
+  private isDerivedInterval(interval: TimeFrame): interval is TimeFrame.week | TimeFrame.month {
+    return interval === TimeFrame.week || interval === TimeFrame.month;
+  }
+
+  private warmupLog(message: string): void {
+    if (this.warmupVerbose) this.logger.log(message);
+  }
+
+  private warmupDebug(message: string): void {
+    if (this.warmupVerbose) this.logger.debug(message);
+  }
+
+  private backfillLog(message: string): void {
+    if (this.backfillVerbose) this.logger.log(message);
+  }
+
+  private backfillDebug(message: string): void {
+    if (this.backfillVerbose) this.logger.debug(message);
+  }
+
+  private derivedLog(message: string): void {
+    if (this.derivedVerbose) this.logger.log(message);
+  }
+
+  private parsePositiveInt(value: unknown): number | null {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return null;
+    const i = Math.trunc(n);
+    return i > 0 ? i : null;
+  }
+
+  private envLookbackByInterval(interval: TimeFrame): number | null {
+    const byTf: Partial<Record<TimeFrame, string>> = {
+      [TimeFrame.min1]: process.env.CANDLES_LOOKBACK_MIN1_DAYS,
+      [TimeFrame.min5]: process.env.CANDLES_LOOKBACK_MIN5_DAYS,
+      [TimeFrame.min15]: process.env.CANDLES_LOOKBACK_MIN15_DAYS,
+      [TimeFrame.min30]: process.env.CANDLES_LOOKBACK_MIN30_DAYS,
+      [TimeFrame.h1]: process.env.CANDLES_LOOKBACK_H1_DAYS,
+      [TimeFrame.h2]: process.env.CANDLES_LOOKBACK_H2_DAYS,
+      [TimeFrame.h4]: process.env.CANDLES_LOOKBACK_H4_DAYS,
+      [TimeFrame.day]: process.env.CANDLES_LOOKBACK_DAY_DAYS,
+      [TimeFrame.week]: process.env.CANDLES_LOOKBACK_WEEK_DAYS,
+      [TimeFrame.month]: process.env.CANDLES_LOOKBACK_MONTH_DAYS,
+    };
+    return this.parsePositiveInt(byTf[interval]);
+  }
+
+  private configLookbackByInterval(interval: TimeFrame): number | null {
+    const cfg = this.configService.getConfig()?.provider?.candleSync;
+    const map = (cfg?.lookbackDays ?? {}) as LookbackDaysConfig;
+    const fromMap = this.parsePositiveInt(map[interval]);
+    if (fromMap != null) return fromMap;
+    return this.parsePositiveInt(cfg?.warmupDays);
+  }
+
+  private getLookbackDays(interval: TimeFrame): number {
+    return (
+      this.envLookbackByInterval(interval) ??
+      this.configLookbackByInterval(interval) ??
+      CandleSyncService.DEFAULT_LOOKBACK_DAYS[interval]
+    );
+  }
+
+  private getOverlapCandles(): number {
+    const envValue = this.parsePositiveInt(process.env.CANDLES_BACKFILL_OVERLAP_CANDLES);
+    if (envValue != null) return Math.min(5, envValue);
+    const cfgValue = this.parsePositiveInt(
+      this.configService.getConfig()?.provider?.candleSync?.overlapCandles,
+    );
+    if (cfgValue != null) return Math.min(5, cfgValue);
+    return 2;
+  }
+
+  private expectedCandlesCount(interval: TimeFrame, fromMs: number, toMs: number): number {
+    const intervalMs = ms(interval);
+    if (!Number.isFinite(intervalMs) || intervalMs <= 0) return 0;
+    if (toMs < fromMs) return 0;
+    return Math.floor((toMs - fromMs) / intervalMs) + 1;
+  }
+
+  async onModuleInit(): Promise<void> {
+    const clearHistoryOnStartup =
+      this.configService.getConfig()?.provider?.candleSync?.clearHistoryOnStartup === true;
+
+    if (!clearHistoryOnStartup || this.hasTruncatedThisRun) return;
+
+    try {
+      await this.candleQuery.truncateCandles();
+      this.hasTruncatedThisRun = true;
+      this.logger.log(
+        'Candles table truncated (clearHistoryOnStartup). Warmup will run when subscriptions are ready.',
+      );
+    } catch (err) {
+      this.logger.error('Failed to truncate candles table (clearHistoryOnStartup)', err as any);
+    }
+  }
+
+  private isConnectorSupported(connectorType: ConnectorType): boolean {
+    return connectorType === ConnectorType.binance || connectorType === ConnectorType.alpaca;
+  }
+
+  private createWarmupOpId(): string {
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`.toUpperCase();
+  }
+
+  private warmupPrefix(meta: WarmupLogMeta): string {
+    const { opId, ctx } = meta;
+    return `[warmup:${opId}] [ctx symbol=${ctx.symbol} tf=${String(
+      ctx.tf,
+    )} connectorType=${ctx.connectorType} marketType=${ctx.marketType}]`;
+  }
+
+  private filterWarmupSymbols(symbols: Symbol[]): Symbol[] {
+    const skip = new Set<string>(['USDT', 'BUSD', 'USDC', 'FDUSD', 'TUSD']);
+    return symbols.filter((s) => {
+      const name = (typeof s === 'string' ? s : s.name || '').toUpperCase();
+      if (skip.has(name)) return false;
+      if (name.length < 6) return false;
+      return true;
+    });
+  }
+
+  @OnEvent(CANDLE_SUBSCRIPTIONS_UPDATED)
+  async onSubscriptionsUpdated(payload: CandleSubscriptionsUpdatedPayload): Promise<void> {
+    if (!payload?.symbols?.length || !payload?.intervals?.length) {
+      this.logger.warn(
+        `Candle sync skipped: no symbols or intervals (symbols=${payload?.symbols?.length ?? 0}, intervals=${payload?.intervals?.length ?? 0})`,
+      );
+      return;
+    }
+
+    const { connectorType, marketType, symbols, intervals } = payload;
+
+    if (!this.isConnectorSupported(connectorType)) {
+      this.logger.debug(`Candle sync skipped for unsupported connector: ${connectorType}`);
+      return;
+    }
+
+    const symbolsFiltered = this.filterWarmupSymbols(symbols);
+    if (symbolsFiltered.length < symbols.length) {
+      this.logger.debug(
+        `Warmup: skipped ${symbols.length - symbolsFiltered.length} non-tradeable symbols (e.g. USDT alone)`,
+      );
+    }
+
+    const key = `${connectorType}:${marketType}`;
+
+    this.state.set(key, {
+      connectorType,
+      marketType,
+      symbols: [...symbolsFiltered],
+      intervals: [...intervals],
+    });
+
+    if (this.warmupRunningKeys.has(key)) {
+      this.warmupQueuedKeys.add(key);
+      this.logger.log(`Warmup already running for ${key}. Queued rerun.`);
+      return;
+    }
+
+    this.startWarmupForKey(key).catch((err) => {
+      this.logger.error(`Warmup failed for ${key}`, err as any);
+    });
+  }
+
+  private async startWarmupForKey(key: string): Promise<void> {
+    const sub = this.state.get(key);
+    if (!sub) return;
+
+    // 🔒 Ждём если другой warmup уже идёт
+    while (this.warmupGlobalRunning) {
+      await new Promise((r) => setTimeout(r, 200));
+    }
+
+    this.warmupGlobalRunning = true;
+    this.warmupRunningKeys.add(key);
+    this.warmupQueuedKeys.delete(key);
+    this.warmupGate.setWarmupCompleted(false);
+
+    const { connectorType, marketType, symbols, intervals } = sub;
+    this.warmupGate.setWarmupRunning(String(connectorType), String(marketType), true);
+
+    try {
+      this.logger.log(
+        `Subscriptions updated: ${key}, symbols=${symbols.length}, intervals=${intervals.length}. Starting warmup.`,
+      );
+
+      await this.runWarmup(connectorType, marketType, symbols, intervals);
+    } finally {
+      this.warmupGate.setWarmupRunning(String(connectorType), String(marketType), false);
+      this.warmupRunningKeys.delete(key);
+      this.warmupGlobalRunning = false;
+    }
+
+    if (this.warmupQueuedKeys.has(key)) {
+      this.logger.log(`Warmup queued rerun detected for ${key}. Restarting warmup.`);
+      await this.startWarmupForKey(key);
+    }
+  }
+
+  /**
+   * One (symbol, interval) warmup task.
+   */
+  private async warmupOneSymbolInterval(
+    connectorType: ConnectorType,
+    marketType: MarketType,
+    s: Symbol,
+    interval: TimeFrame,
+    requestFn: ((from: number, to: number, symbol: string, interval: TimeFrame) => Promise<unknown>) | null,
+    now: number,
+    lookbackDays: number,
+  ): Promise<void> {
+    const symbolName = typeof s === 'string' ? s : s.name;
+    const ctx = {
+      symbol: symbolName,
+      tf: interval,
+      connectorType: String(connectorType),
+      marketType: String(marketType),
+    } as const;
+    const meta: WarmupLogMeta = {
+      opId: this.createWarmupOpId(),
+      ctx,
+    };
+    const logPrefix = this.warmupPrefix(meta);
+
+    try {
+      const coverage = await this.candleQuery.loadSeriesCoverage({
+        symbol: ctx.symbol,
+        connectorType: ctx.connectorType,
+        marketType: ctx.marketType,
+        interval: ctx.tf,
+        logMeta: meta,
+      });
+      const lastTs = coverage.maxTsMs;
+      const firstTs = coverage.minTsMs;
+      const lookbackFrom = Math.max(0, now - lookbackDays * DAY);
+      const expectedCount = this.isDerivedInterval(ctx.tf)
+        ? 0
+        : this.expectedCandlesCount(ctx.tf, lookbackFrom, now);
+
+      if (lastTs != null && requestFn) {
+        if (this.isDerivedInterval(ctx.tf)) {
+          this.derivedLog(
+            `${logPrefix} [DERIVED] Weekly/monthly candles will be computed internally`,
+          );
+          const lookbackMs = lookbackDays * DAY;
+          const from = Math.max(0, now - lookbackMs);
+          const rows = await this.derivedCandleService.recomputeRangeFromDaily({
+            symbol: ctx.symbol,
+            connectorType: ctx.connectorType,
+            marketType: ctx.marketType,
+            interval: ctx.tf,
+            fromMs: from,
+            toMs: now,
+          });
+          this.warmupLog(`${logPrefix} [DERIVED] updated candles=${rows}`);
+          return;
+        }
+
+        if (
+          firstTs != null &&
+          (firstTs > lookbackFrom || coverage.count < expectedCount)
+        ) {
+          const backfillTo = Math.max(lookbackFrom, firstTs - ms(ctx.tf));
+          this.warmupLog(
+            `${logPrefix} coverage check: expected=${expectedCount}, actual=${coverage.count}, firstTs=${new Date(
+              firstTs,
+            ).toISOString()}, targetFrom=${new Date(lookbackFrom).toISOString()} -> backfill older range`,
+          );
+          if (lookbackFrom <= backfillTo) {
+            const backfilled = await this.symbolHistory.loadForSymbol({
+              connectorType: ctx.connectorType,
+              marketType: ctx.marketType,
+              symbol: ctx.symbol,
+              interval: ctx.tf,
+              from: lookbackFrom,
+              to: backfillTo,
+              requestFn,
+              logMeta: meta,
+            });
+            this.warmupLog(
+              `${logPrefix} older-range backfill done, candles=${backfilled.length}`,
+            );
+          }
+        }
+
+        const intervalMs = ms(ctx.tf);
+        const overlapCandles = this.getOverlapCandles();
+        const from = Math.max(lookbackFrom, lastTs - overlapCandles * intervalMs);
+        if (from >= now) {
+          this.warmupDebug(`${logPrefix} already up to date, skip`);
+          return;
+        }
+        const candles = await this.symbolHistory.loadForSymbol({
+          connectorType: ctx.connectorType,
+          marketType: ctx.marketType,
+          symbol: ctx.symbol,
+          interval: ctx.tf,
+          from,
+          to: now,
+          requestFn,
+          minTimeExclusive: Math.max(0, lastTs - overlapCandles * intervalMs),
+          logMeta: meta,
+        });
+        this.warmupLog(
+          `${logPrefix} extended from ${new Date(lastTs).toISOString()}, candles=${candles.length}`,
+        );
+      } else {
+        if (this.isDerivedInterval(ctx.tf)) {
+          this.derivedLog(
+            `${logPrefix} [DERIVED] Weekly/monthly candles will be computed internally`,
+          );
+          const from = now - lookbackDays * DAY;
+          const rows = await this.derivedCandleService.recomputeRangeFromDaily({
+            symbol: ctx.symbol,
+            connectorType: ctx.connectorType,
+            marketType: ctx.marketType,
+            interval: ctx.tf,
+            fromMs: from,
+            toMs: now,
+          });
+          this.warmupLog(`${logPrefix} [DERIVED] history loaded, candles=${rows}`);
+          return;
+        }
+        const candles = await this.historyLoader.getHistory({
+          connectorType: ctx.connectorType as ConnectorType,
+          marketType: ctx.marketType as MarketType,
+          symbols: [s],
+          interval: ctx.tf,
+          days: lookbackDays,
+          gapDays: 0,
+          logMeta: meta,
+        });
+        this.warmupLog(`${logPrefix} history loaded, candles=${candles.length}`);
+      }
+    } catch (err) {
+      this.logger.warn(
+        `${logPrefix} skipped: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  private async runWarmup(
+    connectorType: ConnectorType,
+    marketType: MarketType,
+    symbols: Symbol[],
+    intervals: TimeFrame[],
+    warmupDaysOverride?: number, // legacy compatibility; prefer per-interval lookback
+  ): Promise<void> {
+    if (!this.hasCleanedUnreasonableTsThisRun) {
+      await this.candleQuery.cleanupUnreasonableCandles();
+      this.hasCleanedUnreasonableTsThisRun = true;
+    }
+
+    await this.questDbQueryService.ensureWalHealthy('candles');
+
+    const now = Date.now();
+    let requestFn: ((from: number, to: number, symbol: string, interval: TimeFrame) => Promise<unknown>) | null = null;
+    try {
+      requestFn = this.requestFactory.create(connectorType, marketType);
+    } catch {
+      requestFn = null;
+    }
+
+    for (const interval of intervals) {
+      const lookbackDays =
+        warmupDaysOverride != null
+          ? warmupDaysOverride
+          : this.getLookbackDays(interval);
+      if (this.warmupIntervalLogs || this.warmupVerbose) {
+        this.logger.log(
+          `[Warmup] lookbackDays=${lookbackDays} interval=${interval} connector=${connectorType} market=${marketType}`,
+        );
+      }
+      if (this.isDerivedInterval(interval)) {
+        this.derivedLog(
+          `[DERIVED] interval=${interval} skip external backfill, use local aggregation`,
+        );
+      }
+      for (const s of symbols) {
+        await this.warmupOneSymbolInterval(
+          connectorType,
+          marketType,
+          s,
+          interval,
+          requestFn,
+          now,
+          lookbackDays,
+        );
+      }
+    }
+
+    this.logger.log(
+      `Warmup done: ${connectorType}:${marketType}, ${symbols.length} symbols, ${intervals.length} intervals`,
+    );
+    this.warmupGate.setWarmupCompleted(true);
+    this.logger.log(
+      `[Warmup] Key completed: ${connectorType}:${marketType} symbols=${symbols.length} intervals=${intervals.length}`,
+    );
+  }
+
+  /** Block until HTTP history warmup for current key has completed. */
+  async waitForWarmupCompletion(): Promise<void> {
+    while (!this.warmupGate.isWarmupCompleted()) {
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  }
+
+  isWarmupCompleted(): boolean {
+    return this.warmupGate.isWarmupCompleted();
+  }
+
+  @Cron(CronExpression.EVERY_5_MINUTES)
+  async runBackfill(): Promise<void> {
+    if (this.state.size === 0) return;
+
+    await this.ddlService.tryResumeCandlesWal();
+
+    if (this.warmupRunningKeys.size > 0) {
+      this.logger.debug(
+        `Backfill skipped: warmup in progress (${this.warmupRunningKeys.size} keys running)`,
+      );
+      return;
+    }
+
+    const now = Date.now();
+    for (const [, sub] of this.state) {
+      const { connectorType, marketType, symbols, intervals } = sub;
+
+      let requestFn: (from: number, to: number, symbol: string, interval: TimeFrame) => Promise<unknown>;
+      try {
+        requestFn = this.requestFactory.create(connectorType, marketType);
+      } catch {
+        continue;
+      }
+
+      for (const interval of intervals) {
+        const lookbackDays = this.getLookbackDays(interval);
+        const overlapCandles = this.getOverlapCandles();
+        const intervalMs = this.isDerivedInterval(interval) ? DAY : ms(interval);
+        this.backfillLog(
+          `[Backfill] lookbackDays=${lookbackDays} interval=${interval} connector=${connectorType} market=${marketType}`,
+        );
+        if (this.isDerivedInterval(interval)) {
+          this.derivedLog(
+            `[DERIVED] interval=${interval} skip external backfill, use local aggregation`,
+          );
+        }
+
+        for (const s of symbols) {
+          const symbolName = typeof s === 'string' ? s : s.name;
+          if (!symbolName) continue;
+
+          try {
+            const lastTs = await this.candleQuery.loadLastTimestamp({
+              symbol: symbolName,
+              connectorType: String(connectorType),
+              marketType: String(marketType),
+              interval,
+            });
+
+            if (this.isDerivedInterval(interval)) {
+              const fromDerived =
+                lastTs != null
+                  ? Math.max(0, lastTs - lookbackDays * DAY)
+                  : now - lookbackDays * DAY;
+              await this.derivedCandleService.recomputeRangeFromDaily({
+                symbol: symbolName,
+                connectorType: String(connectorType),
+                marketType: String(marketType),
+                interval,
+                fromMs: fromDerived,
+                toMs: now,
+              });
+              continue;
+            }
+
+            const from =
+              lastTs == null
+                ? now - lookbackDays * DAY
+                : Math.max(0, lastTs - overlapCandles * intervalMs);
+
+            if (from > now) continue;
+
+            await this.symbolHistory.loadForSymbol({
+              connectorType,
+              marketType,
+              symbol: symbolName,
+              interval,
+              from,
+              to: now,
+              requestFn,
+              minTimeExclusive:
+                lastTs != null ? Math.max(0, lastTs - overlapCandles * intervalMs) : undefined,
+            });
+
+            this.backfillDebug(
+              `Backfill ${symbolName} ${interval}: from ${new Date(from).toISOString()} to now`,
+            );
+          } catch (err) {
+            this.logger.warn(
+              `Backfill failed ${symbolName} ${interval}: ${
+                err instanceof Error ? err.message : String(err)
+              }`,
+            );
+          }
+        }
+      }
+    }
+  }
+}

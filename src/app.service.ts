@@ -14,6 +14,6 @@ export class AppService {
     //   return this.configService.getConfig().detector.general.apiPort;
     // }
     // getProviderApiToken(): string {
-    //   return this.configService.getConfig().provider.restApiToken;
+    //   return this.configService.getConfig().provider.apiToken;
     // }
 }

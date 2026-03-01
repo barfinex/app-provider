@@ -96,13 +96,23 @@ export class OrderRepository {
   }
 
   async findAndCount(where: string, limit?: number, offset?: number) {
+    const hasLimit = typeof limit === 'number' && Number.isFinite(limit) && limit > 0;
+    const safeOffset =
+      typeof offset === 'number' && Number.isFinite(offset) && offset > 0
+        ? Math.floor(offset)
+        : 0;
+    const limitClause = hasLimit
+      ? safeOffset > 0
+        ? `LIMIT ${safeOffset}, ${Math.floor(limit!)}`
+        : `LIMIT ${Math.floor(limit!)}`
+      : '';
+
     const rows = await this.reader.queryAsObjects(`
       SELECT *
       FROM orders
       WHERE ${where} AND status!='deleted'
       ORDER BY time DESC
-      ${limit ? `LIMIT ${limit}` : ''}
-      ${offset ? `OFFSET ${offset}` : ''}
+      ${limitClause}
     `);
 
     const count = await this.reader.queryValue(`

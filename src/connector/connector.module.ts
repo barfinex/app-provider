@@ -47,7 +47,7 @@ import { BinanceModule } from './datasource/binance/binance.module';
 
     forwardRef(() => AccountModule),
     forwardRef(() => DetectorModule),
-    // forwardRef(() => CandleModule),
+    forwardRef(() => CandleModule),
 
     // QuestDB stack
     QuestDBModule,

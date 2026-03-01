@@ -9,7 +9,9 @@ interface SocketInfo {
     reconnecting: boolean;
     pingInterval?: NodeJS.Timeout;
     callbacks: MessageCallback[];
-    activeSubs?: string[];   // 🔥 какие подписки есть
+    activeSubs?: string[];
+    /** Set when disconnect() is called — do not attempt reconnect on close */
+    intentionalClose?: boolean;
 }
 
 @Injectable()
@@ -92,6 +94,10 @@ export class WebSocketService {
             });
 
             ws.on('error', (err) => {
+                if (socketInfo.intentionalClose) {
+                    this.logger.debug(`WebSocket closed before connect (intentional): ${wsUrl}`);
+                    return;
+                }
                 this.logger.error(`WebSocket error on ${wsUrl}: ${err.message}`);
             });
 
@@ -99,11 +105,13 @@ export class WebSocketService {
                 clearTimeout(timeout);
                 clearInterval(socketInfo.pingInterval);
 
-                this.logger.warn(
-                    `WebSocket closed ${wsUrl}. Code: ${code}, Reason: ${reason || 'none'}`,
-                );
+                if (!socketInfo.intentionalClose) {
+                    this.logger.warn(
+                        `WebSocket closed ${wsUrl}. Code: ${code}, Reason: ${reason || 'none'}`,
+                    );
+                }
 
-                // 🔥 попытка отписки
+                // попытка отписки (только если открыт)
                 if (socketInfo.activeSubs?.length) {
                     try {
                         const payload = {
@@ -124,11 +132,11 @@ export class WebSocketService {
                     }
                 }
 
-                // ❌ удаляем старый сокет
                 this.sockets.delete(wsUrl);
 
+                if (socketInfo.intentionalClose) return;
                 if (!socketInfo.reconnecting) {
-                    socketInfo.reconnecting = true; // 🔥 ВАЖНО
+                    socketInfo.reconnecting = true;
                     this.attemptReconnect(wsUrl, socketInfo.callbacks, socketInfo.retryCount);
                 }
             });
@@ -195,6 +203,7 @@ export class WebSocketService {
         const socketInfo = this.sockets.get(wsUrl);
         if (!socketInfo) return;
 
+        socketInfo.intentionalClose = true;
         clearInterval(socketInfo.pingInterval);
         socketInfo.ws.close();
         this.sockets.delete(wsUrl);

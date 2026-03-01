@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "./src",
+    "outDir": "../../dist/apps/provider/mcp",
+    "composite": false,
+    "declaration": false
+  },
+  "include": ["src/mcp/**/*.ts"],
+  "exclude": ["node_modules", "dist", "test", "**/*spec.ts"],
+  "references": [
+    {
+      "path": "../../libs/provider-mcp"
+    }
+  ]
+}

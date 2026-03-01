@@ -9,5 +9,5 @@ export type ReplayEvent = {
     ts: number;
     category: string;
     action: string;
-    payload: any;
+    payload: Record<string, unknown>;
 };

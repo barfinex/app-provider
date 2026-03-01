@@ -15,6 +15,7 @@ import { EventSinkModule } from '../questdb/event-sink/event-sink.module';
 // App modules
 import { ConnectorModule } from '../connector/connector.module';
 import { OrderModule } from '../order/order.module';
+import { AppRegistryModule } from '../app-registry/app-registry.module';
 
 @Module({
     imports: [
@@ -27,6 +28,7 @@ import { OrderModule } from '../order/order.module';
         // App architecture
         forwardRef(() => ConnectorModule),
         forwardRef(() => OrderModule),
+        forwardRef(() => AppRegistryModule), // для статуса offline, если детектор не шлёт чеки
     ],
 
     controllers: [

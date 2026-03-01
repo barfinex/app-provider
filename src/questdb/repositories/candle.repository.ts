@@ -1,11 +1,12 @@
 import { Injectable } from '@nestjs/common';
+import { TimeFrame } from '@barfinex/types';
 import { BaseRepository } from './base.repository';
 import { QuestDBWriteService } from '../questdb-write.service';
 import { QuestDBQueryService } from '../questdb-query.service';
 
 export interface CandleEntity {
   symbol: string;
-  interval: string;
+  interval: TimeFrame;
   connectorType: string;
   marketType: string;
 
@@ -31,7 +32,7 @@ export class CandleRepository extends BaseRepository<CandleEntity> {
   async bulkInsertHistory(bars: CandleEntity[]) {
     if (!bars.length) return;
 
-    this.writer.writeBatch(
+    await this.writer.writeBatch(
       this.channel,
       bars.map(b => ({
         table: this.tableName,
@@ -48,14 +49,14 @@ export class CandleRepository extends BaseRepository<CandleEntity> {
           close: b.close,
           volume: b.volume,
         },
-        timestampNs: b.ts * 1_000_000,
+        timestampNs: BigInt(Math.trunc(b.ts) * 1_000_000),
       }))
     );
   }
 
   async upsertFromTrade(params: {
     symbol: string;
-    interval: string;
+    interval: TimeFrame;
     connectorType: string;
     marketType: string;
     ts: number;
@@ -73,7 +74,7 @@ export class CandleRepository extends BaseRepository<CandleEntity> {
         low: price,
         volume: volumeDelta,
       },
-      timestampNs: ts * 1_000_000,
+      timestampNs: BigInt(Math.trunc(ts) * 1_000_000),
     });
   }
 
@@ -93,19 +94,19 @@ export class CandleRepository extends BaseRepository<CandleEntity> {
         close: b.close,
         volume: b.volume,
       },
-      timestampNs: b.ts * 1_000_000,
+      timestampNs: BigInt(Math.trunc(b.ts) * 1_000_000),
     });
   }
 
-  async getRange(symbol: string, interval: string, from: number, to: number) {
+  async getRange(symbol: string, interval: TimeFrame, from: number, to: number) {
     symbol = symbol.replace(/'/g, "''");
-    interval = interval.replace(/'/g, "''");
+    const intervalStr = String(interval).replace(/'/g, "''");
 
     return this.reader.queryAsObjects(`
       SELECT *
       FROM candles
       WHERE symbol='${symbol}'
-        AND interval='${interval}'
+        AND interval='${intervalStr}'
         AND ts BETWEEN ${from} * 1000 AND ${to} * 1000
       ORDER BY ts ASC
     `);

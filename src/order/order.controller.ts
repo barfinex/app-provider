@@ -1,4 +1,5 @@
 import {
+    BadRequestException,
     Body,
     Controller,
     Delete,
@@ -15,8 +16,9 @@ import { ApiTags } from '@nestjs/swagger';
 
 import { OrderService } from './order.service';
 import { DetectorService } from '../detector/detector.service';
+import { ConnectorService } from '../connector/connector.service';
 
-import { Order, OrderSourceType, Symbol } from '@barfinex/types';
+import { ConnectorType, MarketType, Order, OrderSourceType, Symbol } from '@barfinex/types';
 
 @ApiTags('Orders')
 @Controller('orders')
@@ -26,6 +28,9 @@ export class OrderController {
 
         @Inject(forwardRef(() => DetectorService))
         private readonly detectorService: DetectorService,
+
+        @Inject(forwardRef(() => ConnectorService))
+        private readonly connectorService: ConnectorService,
     ) { }
 
     // ========================================================
@@ -61,6 +66,37 @@ export class OrderController {
         @Body('order') order: Order,
     ) {
         return this.orderService.updateOrder({ id, order });
+    }
+
+    // ========================================================
+    // GET OPEN ORDERS BY DETECTOR
+    // ========================================================
+    @Get(':connectorType/:marketType')
+    async allByConnectorMarket(
+        @Param('connectorType') connectorType: ConnectorType,
+        @Param('marketType') marketType: MarketType,
+        @Query() query: any,
+    ) {
+        const connector = await this.connectorService.get({ connectorType, marketType });
+        const targetMarket = connector.markets?.find(m => m.marketType === marketType);
+        const symbols = targetMarket?.symbols ?? [];
+
+        if (!symbols.length) return [];
+
+        const providerKey = this.connectorService.key || 'provider';
+        const openOrders = await this.orderService.getOpenOrders({
+            connectorType,
+            marketType,
+            symbols,
+            source: {
+                key: providerKey,
+                type: OrderSourceType.provider,
+                restApiUrl: null,
+            },
+            query,
+        });
+
+        return Array.isArray(openOrders) ? openOrders : openOrders.data;
     }
 
     // ========================================================
@@ -224,5 +260,40 @@ export class OrderController {
         }
 
         return result;
+    }
+
+    // ========================================================
+    // DELETE ORDER BY ID + CONNECTOR + MARKET
+    // ========================================================
+    @Delete(':id/:connectorType/:marketType')
+    async deleteByIdConnectorMarket(
+        @Param('id') id: string,
+        @Param('connectorType') connectorType: ConnectorType,
+        @Param('marketType') marketType: MarketType,
+    ) {
+        const order = await this.orderService.get(id);
+
+        if (
+            order.connectorType !== connectorType ||
+            order.marketType !== marketType
+        ) {
+            throw new BadRequestException(
+                `Order ${id} does not belong to ${connectorType}/${marketType}`,
+            );
+        }
+
+        await this.orderService.closeOrder(order);
+        return true;
+    }
+
+    // ========================================================
+    // DELETE ALL ORDERS BY CONNECTOR + MARKET
+    // ========================================================
+    @Delete('all/:connectorType/:marketType')
+    async deleteAllByConnectorMarket(
+        @Param('connectorType') connectorType: ConnectorType,
+        @Param('marketType') marketType: MarketType,
+    ) {
+        return this.orderService.deleteAll({ connectorType, marketType });
     }
 }

@@ -18,6 +18,7 @@ import 'moment-timezone';
 
 @Injectable()
 export class OrderService {
+    private readonly INVALID_SYMBOL_MESSAGE = 'Invalid symbol';
 
     constructor(
         @Inject(forwardRef(() => ConnectorService))
@@ -87,13 +88,23 @@ export class OrderService {
             });
         } else {
             for (const s of symbols) {
-                const list = await this.connectorService.getOpenOrders({
-                    source,
-                    symbol: s,
-                    connectorType,
-                    marketType
-                });
-                connectorOrders.push(...list);
+                try {
+                    const list = await this.connectorService.getOpenOrders({
+                        source,
+                        symbol: s,
+                        connectorType,
+                        marketType
+                    });
+                    connectorOrders.push(...list);
+                } catch (error: any) {
+                    const message = String(error?.message ?? error ?? '');
+                    if (message.includes(this.INVALID_SYMBOL_MESSAGE)) {
+                        // Some connector symbol lists may contain entries that are not accepted
+                        // by getOpenOrders(symbol=...), skip them instead of failing the whole request.
+                        continue;
+                    }
+                    throw error;
+                }
             }
         }
 

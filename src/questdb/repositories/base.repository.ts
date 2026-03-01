@@ -21,7 +21,7 @@ export abstract class BaseRepository<T = any> {
     // INSERT SINGLE ROW
     // ===============================================
     async insert(options: Omit<ILPWriteOptions, 'table'>) {
-        this.writer.write(this.channel, {
+        await this.writer.write(this.channel, {
             ...options,
             table: this.tableName,
         });
@@ -31,7 +31,7 @@ export abstract class BaseRepository<T = any> {
     // BATCH INSERT
     // ===============================================
     async insertBatch(rows: Omit<ILPWriteOptions, 'table'>[]) {
-        this.writer.writeBatch(
+        await this.writer.writeBatch(
             this.channel,
             rows.map(r => ({
                 ...r,
@@ -44,7 +44,7 @@ export abstract class BaseRepository<T = any> {
     // FLUSH CHANNEL
     // ===============================================
     async flush() {
-        this.writer.flush(this.channel);
+        await this.writer.flush(this.channel);
     }
 
     // ===============================================

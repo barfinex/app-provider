@@ -30,7 +30,7 @@ export class AppController {
             studioName: '',
             studioDescription: '',
             studioSocketApiUrl: '',
-            restApiToken: '',
+            apiToken: '',
             restApiUrl: ''
         };
 

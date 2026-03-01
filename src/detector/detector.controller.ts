@@ -13,7 +13,7 @@ import {
 import { DetectorService } from './detector.service';
 import { ConnectorService } from '../connector/connector.service';
 
-import { Detector, Symbol, TimeFrame } from '@barfinex/types';
+import { Detector, DetectorListItem, Symbol, TimeFrame } from '@barfinex/types';
 import { ApiTags } from '@nestjs/swagger';
 
 @ApiTags('Detectors')
@@ -28,7 +28,7 @@ export class DetectorController {
     // GET ALL DETECTORS FOR CURRENT PROVIDER
     // -------------------------------------------------------
     @Get()
-    async getAll() {
+    async getAll(): Promise<DetectorListItem[]> {
         const key = this.connectorService.key;
 
         if (!key) {

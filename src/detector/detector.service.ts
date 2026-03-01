@@ -15,15 +15,25 @@ import { catchError, map, lastValueFrom } from 'rxjs';
 import { DetectorRepository, DetectorEntity } from './detector.repository';
 import {
     Detector,
+    DetectorListItem,
+    DetectorStatus,
     MarketType,
     ConnectorType,
     TimeFrame,
     Trade,
     Symbol,
 } from '@barfinex/types';
+import { buildDetectorConfig } from '@barfinex/types';
 
 import { ConnectorService } from '../connector/connector.service';
 import { OrderService } from '../order/order.service';
+import { AppRegistryService } from '../app-registry/app-registry.service';
+
+function detectorStatus(opts: { isActive?: boolean; isBlocked?: boolean }): DetectorStatus {
+    if (opts.isBlocked === true) return 'blocked';
+    if (opts.isActive === false) return 'disabled';
+    return 'active';
+}
 
 @Injectable()
 export class DetectorService {
@@ -37,29 +47,46 @@ export class DetectorService {
 
         @Inject(forwardRef(() => OrderService))
         private readonly orderService: OrderService,
+
+        @Inject(forwardRef(() => AppRegistryService))
+        private readonly appRegistry: AppRegistryService,
     ) { }
 
     // -------------------------------------------------------
     // GET LIST BY PROVIDER KEY
     // -------------------------------------------------------
-    async getAllDetectorsByProviderKey(providerKey: string): Promise<Detector[]> {
-        console.log('getAllDetectorsByProviderKey', providerKey);
-
-        const detectors = await this.detectorRepository.find();
+    async getAllDetectorsByProviderKey(providerKey: string): Promise<DetectorListItem[]> {
+        const [detectors, activeKeys] = await Promise.all([
+            this.detectorRepository.find(),
+            this.appRegistry.getActiveAppKeys('detector'),
+        ]);
 
         return detectors
             .filter((d) =>
                 d.options.providers?.some((p: { key: string; }) => p.key === providerKey),
             )
-            .map((d) => d.options);
+            .map((d) => ({
+                ...d.options,
+                status: activeKeys.has(d.options.key)
+                    ? detectorStatus({ isActive: d.options.isActive, isBlocked: d.options.isBlocked })
+                    : 'offline',
+            }));
     }
 
     // -------------------------------------------------------
     // GET ALL DETECTORS
     // -------------------------------------------------------
-    async getAllDetectors(): Promise<Detector[]> {
-        const entities = await this.detectorRepository.find();
-        return entities.map((e) => e.options);
+    async getAllDetectors(): Promise<DetectorListItem[]> {
+        const [entities, activeKeys] = await Promise.all([
+            this.detectorRepository.find(),
+            this.appRegistry.getActiveAppKeys('detector'),
+        ]);
+        return entities.map((e) => ({
+            ...e.options,
+            status: activeKeys.has(e.options.key)
+                ? detectorStatus({ isActive: e.options.isActive, isBlocked: e.options.isBlocked })
+                : 'offline',
+        }));
     }
 
     // -------------------------------------------------------
@@ -174,6 +201,115 @@ export class DetectorService {
 
         const saved = await this.detectorRepository.save(newDetector);
         return saved.options;
+    }
+
+    // -------------------------------------------------------
+    // UPSERT DETECTOR FROM APP REGISTRY (register/heartbeat)
+    // So GET /api/detectors shows running detectors.
+    // Uses meta.studioKey (UUID for UI studio) and meta.detectorSnapshot (config at startup).
+    // -------------------------------------------------------
+    async upsertDetectorFromRegistration(
+        params: {
+            appKey: string;
+            displayName?: string;
+            baseUrl?: string;
+            version?: string;
+            meta?: Record<string, unknown>;
+        },
+        providerKey: string,
+    ): Promise<Detector> {
+        const { appKey, displayName, baseUrl, meta = {} } = params;
+        const studioKey = typeof meta.studioKey === 'string' ? meta.studioKey : undefined;
+        const snapshot = meta.detectorSnapshot as Record<string, unknown> | undefined;
+        const existing = await this.detectorRepository.findOne({
+            where: { key: appKey },
+        });
+
+        const providerStub = {
+            key: providerKey,
+            apiToken: '',
+            restApiUrl: '',
+            accounts: [],
+        };
+
+        const baseFromSnapshot = snapshot
+            ? {
+                key: appKey,
+                sysname: (snapshot.sysname as string) ?? displayName ?? appKey,
+                restApiUrl: baseUrl ?? (snapshot.restApiUrl as string) ?? '',
+                providers: Array.isArray(snapshot.providers) && (snapshot.providers as any[]).length > 0
+                    ? (snapshot.providers as any[]).map((p: any) => ({
+                        ...p,
+                        apiToken: p.apiToken ?? '',
+                        accounts: p.accounts ?? [],
+                    }))
+                    : [providerStub],
+                symbols: Array.isArray(snapshot.symbols) ? snapshot.symbols : [],
+                intervals: Array.isArray(snapshot.intervals) ? snapshot.intervals : [],
+                subscriptions: Array.isArray(snapshot.subscriptions) ? snapshot.subscriptions : [],
+                qualityGate: snapshot.qualityGate,
+                performance: snapshot.performance,
+                customConfig: snapshot.customConfig,
+                plugins: snapshot.plugins && typeof snapshot.plugins === 'object'
+                    ? { modules: [], metas: (snapshot.plugins as any).metas ?? [] }
+                    : undefined,
+                logLevel: snapshot.logLevel,
+                currency: snapshot.currency,
+                useSandbox: snapshot.useSandbox,
+                useScratch: snapshot.useScratch,
+                isBlocked: snapshot.isBlocked,
+                isActive: snapshot.isActive,
+              }
+            : undefined;
+
+        const detector = buildDetectorConfig({
+            ...(baseFromSnapshot ?? {}),
+            key: appKey,
+            sysname: baseFromSnapshot?.sysname ?? displayName ?? appKey,
+            restApiUrl: baseUrl ?? baseFromSnapshot?.restApiUrl ?? '',
+            providers: baseFromSnapshot?.providers ?? [providerStub],
+            symbols: baseFromSnapshot?.symbols ?? [],
+            intervals: baseFromSnapshot?.intervals ?? [],
+        } as any);
+
+        const optionsWithStudioKey: Detector = {
+            ...detector,
+            ...(studioKey ? { studioKey } : {}),
+        };
+
+        if (existing) {
+            const merged: Detector = {
+                ...existing.options,
+                sysname: baseFromSnapshot?.sysname ?? displayName ?? existing.options.sysname,
+                restApiUrl: baseUrl ?? existing.options.restApiUrl,
+                ...(studioKey ? { studioKey } : {}),
+                ...(baseFromSnapshot
+                    ? {
+                        symbols: baseFromSnapshot.symbols,
+                        intervals: baseFromSnapshot.intervals,
+                        subscriptions: baseFromSnapshot.subscriptions,
+                        qualityGate: baseFromSnapshot.qualityGate,
+                        performance: baseFromSnapshot.performance,
+                        customConfig: baseFromSnapshot.customConfig,
+                        plugins: baseFromSnapshot.plugins,
+                        isActive: baseFromSnapshot.isActive !== undefined ? baseFromSnapshot.isActive : existing.options.isActive,
+                        isBlocked: baseFromSnapshot.isBlocked !== undefined ? baseFromSnapshot.isBlocked : existing.options.isBlocked,
+                    }
+                    : {}),
+            };
+            existing.options = merged;
+            existing.name = merged.sysname ?? existing.name;
+            await this.detectorRepository.save(existing);
+            return existing.options;
+        }
+
+        const entity = this.detectorRepository.create({
+            key: appKey,
+            name: optionsWithStudioKey.sysname ?? displayName ?? appKey,
+            options: optionsWithStudioKey,
+        });
+        await this.detectorRepository.save(entity);
+        return entity.options;
     }
 
     // -------------------------------------------------------

@@ -11,7 +11,7 @@
       "quantity": 0.001
     }
   ],
-  "restApiToken": "${PROVIDER_API_TOKEN}",
+  "apiToken": "${PROVIDER_API_TOKEN}",
   "restApiUrl": "http://localhost:8081/api",
   "connectors": [
     {
@@ -116,15 +116,15 @@
           "active": true
         },
         {
-          "type": "INSPECTOR_EVENT",
+          "type": "INSPECTOR_RISK_LIMIT_BREACH",
           "active": true
         },
         {
-          "type": "DETECTOR_EVENT",
+          "type": "DETECTOR_SIGNAL_GENERATED",
           "active": true
         },
         {
-          "type": "ADVISOR_EVENT",
+          "type": "ADVISOR_DECISION_RESPONSE",
           "active": true
         }
       ]

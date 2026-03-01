@@ -6,9 +6,45 @@ import { Client } from 'pg';
  * Устойчивый, безопасный, с очередью как API, но каждый запрос работает
  * через НОВОЕ соединение (QuestDB не рвёт короткие соединения).
  */
+/** Макс. длина SQL в логе (для поиска запроса, вызвавшего suspended). */
+const QUESTDB_SQL_LOG_MAX_LEN = 400;
+const QUESTDB_QUERY_MAX_ATTEMPTS = Math.max(
+    1,
+    Number(process.env.QUESTDB_QUERY_MAX_ATTEMPTS || 6),
+);
+const QUESTDB_QUERY_RETRY_BASE_MS = Math.max(
+    50,
+    Number(process.env.QUESTDB_QUERY_RETRY_BASE_MS || 120),
+);
+const QUESTDB_QUERY_RETRY_MAX_DELAY_MS = Math.max(
+    QUESTDB_QUERY_RETRY_BASE_MS,
+    Number(process.env.QUESTDB_QUERY_RETRY_MAX_DELAY_MS || 1200),
+);
+
+const WAL_DRAIN_INITIAL_SLEEP_MS = 500;
+const WAL_DRAIN_BACKOFF_SLEEP_MS = 1000;
+const WAL_DRAIN_INITIAL_ATTEMPTS = 5;
+const WAL_DRAIN_MAX_SLEEP_MS = 2000;
+const WAL_RESUME_THROTTLE_MS = 5000;
+const WAL_SUSPENDED_STREAK_FOR_RESUME = 2;
+const WAL_HEALTHY_STREAK_REQUIRED = 2;
+
+export interface WaitForWalDrainOptions {
+    timeoutMs?: number;
+    lagThreshold?: number;
+}
+
+function safeTableName(table: string): boolean {
+    return /^[a-zA-Z0-9_]+$/.test(table);
+}
+
 @Injectable()
 export class QuestDBQueryService implements OnModuleInit {
     private connected = false;
+
+    /** Single-flight per table: only one concurrent RESUME WAL per table. */
+    private walResumeLocks = new Map<string, Promise<void>>();
+    private walLastResumeAt = new Map<string, number>();
 
     // Очередь всё ещё работает, но теперь каждый запрос создаёт свой PG-клиент
     private queue: {
@@ -18,6 +54,12 @@ export class QuestDBQueryService implements OnModuleInit {
     }[] = [];
 
     private readonly logger = new Logger('QuestDBQuery');
+
+    /** Счётчик операций: по нему в логах можно найти запрос перед suspended. */
+    private sqlOpId = 0;
+
+    /** Лог SQL выключен по умолчанию; включается только при QUESTDB_LOG_SQL=true. */
+    private readonly logSql = process.env.QUESTDB_LOG_SQL === 'true';
 
     private readonly host = process.env.QUESTDB_HOST || 'localhost';
     private readonly port = Number(process.env.QUESTDB_PG_PORT || 8812);
@@ -95,19 +137,43 @@ export class QuestDBQueryService implements OnModuleInit {
     // ============================================================
     private async executeSql(sql: string, retry = 1): Promise<any> {
         const client = this.makeClient();
+        const opId = ++this.sqlOpId;
+        const logSql =
+            sql.length > QUESTDB_SQL_LOG_MAX_LEN
+                ? sql.slice(0, QUESTDB_SQL_LOG_MAX_LEN) + '...'
+                : sql;
+        if (this.logSql) {
+            this.logger.log(`[QuestDB SQL #${opId}] ${logSql.replace(/\s+/g, ' ').trim()}`);
+        }
 
         try {
             await client.connect();
             const res = await client.query(sql);
             return res;
         } catch (err) {
-            this.logger.error(`Query failed (${retry}): ${sql}`, err);
+            const message =
+                err instanceof Error
+                    ? `${err.name}: ${err.message}`
+                    : String(err);
+            const retriable = this.isRetriableConnectionError(err);
 
-            // Retry при обрыве QuestDB
-            if (retry <= 2) {
-                await new Promise(r => setTimeout(r, 100));
+            if (retriable && retry < QUESTDB_QUERY_MAX_ATTEMPTS) {
+                const delay = Math.min(
+                    QUESTDB_QUERY_RETRY_MAX_DELAY_MS,
+                    QUESTDB_QUERY_RETRY_BASE_MS * Math.pow(2, retry - 1),
+                );
+                this.logger.warn(
+                    `[QuestDB SQL #${opId}] transient connection error (attempt ${retry}/${QUESTDB_QUERY_MAX_ATTEMPTS}): ${message}. Retrying in ${delay}ms`,
+                );
+                this.safeReconnect();
+                await new Promise(r => setTimeout(r, delay));
                 return this.executeSql(sql, retry + 1);
             }
+
+            this.logger.error(
+                `[QuestDB SQL #${opId}] FAILED (attempt ${retry}/${QUESTDB_QUERY_MAX_ATTEMPTS}): ${logSql.replace(/\s+/g, ' ').trim()}`,
+                err,
+            );
 
             throw err;
         } finally {
@@ -149,5 +215,222 @@ export class QuestDBQueryService implements OnModuleInit {
         const row = await this.queryOne(sql);
         if (!row) return null;
         return Object.values(row)[0] as T;
+    }
+
+    // ============================================================
+    // WAL management (single-flight resume, drain, healthy)
+    // ============================================================
+
+    /** Single place for wal_tables() query; avoids duplicate checks. */
+    private async queryWalState(
+        table: string,
+    ): Promise<{ suspended: boolean; writerTxn: number; sequencerTxn: number } | null> {
+        if (!safeTableName(table)) return null;
+        const rows = await this.queryAsObjects(
+            `SELECT * FROM wal_tables() WHERE name = '${table}'`,
+        );
+        const row = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+        if (!row) return null;
+        return {
+            suspended: Boolean(row.suspended),
+            writerTxn: Number(row.writerTxn ?? row.writer_txn ?? 0),
+            sequencerTxn: Number(row.sequencerTxn ?? row.sequencer_txn ?? 0),
+        };
+    }
+
+    /**
+     * Single-flight RESUME WAL per table. Concurrent callers for the same table
+     * await the same promise; only one ALTER TABLE runs.
+     */
+    private async resumeWalSingleFlight(table: string): Promise<void> {
+        if (!safeTableName(table)) return;
+
+        if (this.walResumeLocks.has(table)) {
+            return this.walResumeLocks.get(table)!;
+        }
+
+        const promise = (async () => {
+            try {
+                const state = await this.queryWalState(table);
+                if (state?.suspended === true) {
+                    const now = Date.now();
+                    const lastResumeAt = this.walLastResumeAt.get(table) ?? 0;
+                    if (now - lastResumeAt < WAL_RESUME_THROTTLE_MS) {
+                        this.logger.debug(
+                            `[WAL] resume cooldown for ${table} (${WAL_RESUME_THROTTLE_MS}ms)`,
+                        );
+                        return;
+                    }
+                    this.logger.debug(`[WAL] resume triggered for ${table}`);
+                    await this.query(`ALTER TABLE ${table} RESUME WAL`);
+                    this.walLastResumeAt.set(table, now);
+                }
+            } finally {
+                this.walResumeLocks.delete(table);
+            }
+        })();
+
+        this.walResumeLocks.set(table, promise);
+        return promise;
+    }
+
+    /** Public API: trigger single-flight RESUME WAL if table is suspended. */
+    async resumeWalIfNeeded(table: string): Promise<void> {
+        await this.resumeWalSingleFlight(table);
+    }
+
+    /**
+     * Return current WAL lag (sequencerTxn - writerTxn) for the table. 0 if no row or invalid.
+     */
+    async getWalLag(table: string): Promise<number> {
+        if (!safeTableName(table)) return 0;
+        const state = await this.queryWalState(table);
+        if (!state) return 0;
+        const lag = state.sequencerTxn - state.writerTxn;
+        return Number.isFinite(lag) ? lag : 0;
+    }
+
+    /**
+     * Return current WAL state for the table: lag and suspended flag. For use by WAL-aware ingestion.
+     */
+    async getWalState(table: string): Promise<{ lag: number; suspended: boolean }> {
+        if (!safeTableName(table)) return { lag: 0, suspended: false };
+        const state = await this.queryWalState(table);
+        if (!state) return { lag: 0, suspended: false };
+        const lag = state.sequencerTxn - state.writerTxn;
+        return {
+            lag: Number.isFinite(lag) ? lag : 0,
+            suspended: state.suspended,
+        };
+    }
+
+    /**
+     * Wait until WAL lag is <= maxLag or timeout. Does not throw; logs warning on timeout.
+     */
+    async waitForWalCatchup(
+        table: string,
+        maxLag: number,
+        timeoutMs: number = 10_000,
+    ): Promise<void> {
+        if (!safeTableName(table)) return;
+        const started = Date.now();
+        while (true) {
+            const lag = await this.getWalLag(table);
+            if (lag <= maxLag) return;
+            if (Date.now() - started > timeoutMs) {
+                this.logger.warn(
+                    `[WAL] waitForWalCatchup timeout | table=${table} | lag=${lag}`,
+                );
+                return;
+            }
+            await new Promise((r) => setTimeout(r, 100));
+        }
+    }
+
+    /**
+     * Wait until WAL apply catches up (suspended === false and lag <= lagThreshold).
+     * Never throws; on timeout or error logs and continues so startup is not blocked.
+     */
+    async waitForWalDrain(
+        table: string,
+        optionsOrTimeout?: number | WaitForWalDrainOptions,
+    ): Promise<void> {
+        if (!safeTableName(table)) return;
+
+        const options: Required<WaitForWalDrainOptions> =
+            typeof optionsOrTimeout === 'number'
+                ? { timeoutMs: optionsOrTimeout, lagThreshold: 10 }
+                : {
+                      timeoutMs: optionsOrTimeout?.timeoutMs ?? 45000,
+                      lagThreshold: optionsOrTimeout?.lagThreshold ?? 10,
+                  };
+
+        try {
+            const start = Date.now();
+            let attempt = 0;
+            let sleepMs = WAL_DRAIN_INITIAL_SLEEP_MS;
+            let suspendedStreak = 0;
+            let healthyStreak = 0;
+
+            while (true) {
+                const state = await this.queryWalState(table);
+                if (!state) {
+                    this.logger.debug('[WAL] drain completed');
+                    return;
+                }
+
+                const lag = state.sequencerTxn - state.writerTxn;
+                this.logger.debug(
+                    `[WAL] checking table=${table} lag=${lag} suspended=${state.suspended}`,
+                );
+
+                if (state.suspended) {
+                    healthyStreak = 0;
+                    suspendedStreak += 1;
+                    if (suspendedStreak >= WAL_SUSPENDED_STREAK_FOR_RESUME) {
+                        this.logger.warn(
+                            `[WAL] table=${table} suspended(${suspendedStreak}) — triggering RESUME WAL`,
+                        );
+                        await this.resumeWalSingleFlight(table);
+                    }
+                } else if (lag <= options.lagThreshold) {
+                    healthyStreak += 1;
+                    suspendedStreak = 0;
+                    if (healthyStreak >= WAL_HEALTHY_STREAK_REQUIRED) {
+                        this.logger.debug('[WAL] drain completed');
+                        return;
+                    }
+                } else {
+                    healthyStreak = 0;
+                    suspendedStreak = 0;
+                }
+
+                if (Date.now() - start >= options.timeoutMs) {
+                    this.logger.warn(
+                        `[WAL] drain timeout — continuing with lag=${lag}`,
+                    );
+                    return;
+                }
+
+                attempt += 1;
+                await new Promise((r) => setTimeout(r, sleepMs));
+                sleepMs =
+                    attempt < WAL_DRAIN_INITIAL_ATTEMPTS
+                        ? WAL_DRAIN_INITIAL_SLEEP_MS
+                        : Math.min(WAL_DRAIN_MAX_SLEEP_MS, sleepMs + WAL_DRAIN_BACKOFF_SLEEP_MS);
+            }
+        } catch (err) {
+            this.logger.warn(
+                '[WAL] waitForWalDrain error — continuing startup',
+                err instanceof Error ? err.message : String(err),
+            );
+        }
+    }
+
+    /**
+     * Ensure table WAL is not suspended and drain has caught up.
+     */
+    async ensureWalHealthy(table: string): Promise<void> {
+        if (!safeTableName(table)) return;
+        await this.resumeWalSingleFlight(table);
+        await this.waitForWalDrain(table, {
+            timeoutMs: 45_000,
+            lagThreshold: 400,
+        });
+    }
+
+    private isRetriableConnectionError(err: unknown): boolean {
+        const raw =
+            err instanceof Error
+                ? `${err.name} ${err.message}`
+                : String(err ?? '');
+        const text = raw.toLowerCase();
+        return (
+            text.includes('econnreset') ||
+            text.includes('econnrefused') ||
+            text.includes('socket hang up') ||
+            text.includes('connection terminated unexpectedly') ||
+            text.includes('connection reset')
+        );
     }
 }

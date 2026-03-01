@@ -251,7 +251,7 @@ services:
       MONGO_INITDB_ROOT_PASSWORD: admin123
 
   questdb:
-    image: questdb/questdb:latest
+    image: questdb/questdb:9.2.2
     ports:
       - "8812:8812"
       - "9000:9000"
