@@ -2,16 +2,26 @@ import { Injectable, Logger } from '@nestjs/common';
 import WebSocket from 'ws';
 
 type MessageCallback = (data: any) => void;
+type SubscribeStreamOptions = {
+    stallThresholdMs?: number;
+};
 
 interface SocketInfo {
     ws: WebSocket;
     retryCount: number;
     reconnecting: boolean;
+    reconnectTimer?: NodeJS.Timeout;
     pingInterval?: NodeJS.Timeout;
+    stallWatchInterval?: NodeJS.Timeout;
+    lastMessageAt?: number;
     callbacks: MessageCallback[];
+    openCallbacks: Array<(ws: WebSocket) => void>;
     activeSubs?: string[];
     /** Set when disconnect() is called — do not attempt reconnect on close */
     intentionalClose?: boolean;
+    stallThresholdMs?: number;
+    stallCooldownUntil?: number;
+    lastStallWarnAt?: number;
 }
 
 @Injectable()
@@ -19,18 +29,56 @@ export class WebSocketService {
     private readonly logger = new Logger(WebSocketService.name);
 
     private sockets = new Map<string, SocketInfo>();
-    private readonly maxRetries = 5;
-    private readonly baseDelay = 5000; // 5s
+    private readonly maxRetries = Math.max(
+        0,
+        Number(process.env.BINANCE_WS_MAX_RETRIES || 0),
+    ); // 0 = unlimited retries
+    private readonly baseDelay = Math.max(
+        500,
+        Number(process.env.BINANCE_WS_RECONNECT_BASE_DELAY_MS || 5_000),
+    );
+    private readonly maxDelay = Math.max(
+        this.baseDelay,
+        Number(process.env.BINANCE_WS_RECONNECT_MAX_DELAY_MS || 30_000),
+    );
+    private readonly reconnectJitterMs = Math.max(
+        0,
+        Number(process.env.BINANCE_WS_RECONNECT_JITTER_MS || 1_500),
+    );
+    private readonly stallThresholdMs = Math.max(
+        1000,
+        Number(process.env.BINANCE_WS_STALL_THRESHOLD_MS || 5_000),
+    );
+    private readonly stallCheckMs = Math.max(
+        500,
+        Number(process.env.BINANCE_WS_STALL_CHECK_INTERVAL_MS || 1_000),
+    );
+    private readonly stallCooldownMs = Math.max(
+        1_000,
+        Number(process.env.BINANCE_WS_STALL_COOLDOWN_MS || 10_000),
+    );
+    private readonly stallWarnThrottleMs = Math.max(
+        1_000,
+        Number(process.env.BINANCE_WS_STALL_WARN_THROTTLE_MS || 10_000),
+    );
+    private readonly transientErrorWarnThrottleMs = 10_000;
+    private lastTransientErrorAt = 0;
 
     /**
  * Подключение к конкретному WS-стриму
  */
-    public async subscribeToStream(wsUrl: string): Promise<() => void> {
+    public async subscribeToStream(
+        wsUrl: string,
+        options?: SubscribeStreamOptions,
+    ): Promise<() => void> {
 
         // =========================================================================
         // 🔒 GUARD: не создаём второй WebSocket для того же wsUrl
         // =========================================================================
         const existing = this.sockets.get(wsUrl);
+        const preservedCallbacks = existing?.callbacks ?? [];
+        const preservedOpenCallbacks = existing?.openCallbacks ?? [];
+        const preservedStallThresholdMs = options?.stallThresholdMs ?? existing?.stallThresholdMs;
         if (existing) {
             const state = existing.ws?.readyState;
 
@@ -53,7 +101,12 @@ export class WebSocketService {
                 ws,
                 retryCount: 0,
                 reconnecting: false,
-                callbacks: [],
+                callbacks: preservedCallbacks,
+                openCallbacks: preservedOpenCallbacks,
+                lastMessageAt: Date.now(),
+                stallThresholdMs: preservedStallThresholdMs,
+                stallCooldownUntil: 0,
+                lastStallWarnAt: 0,
             };
             this.sockets.set(wsUrl, socketInfo);
 
@@ -77,6 +130,42 @@ export class WebSocketService {
                         ws.ping();
                     }
                 }, 30000);
+
+                socketInfo.lastMessageAt = Date.now();
+                for (const openCallback of socketInfo.openCallbacks) {
+                    try {
+                        openCallback(ws);
+                    } catch (error) {
+                        this.logger.error(
+                            `Error running onOpen callback for ${wsUrl}: ${
+                                error instanceof Error ? error.message : String(error)
+                            }`,
+                        );
+                    }
+                }
+                socketInfo.stallWatchInterval = setInterval(() => {
+                    if (socketInfo.intentionalClose) return;
+                    if (socketInfo.reconnecting) return;
+                    if (ws.readyState !== WebSocket.OPEN) return;
+                    const now = Date.now();
+                    if (now < (socketInfo.stallCooldownUntil ?? 0)) return;
+                    const lastMessageAt = socketInfo.lastMessageAt ?? Date.now();
+                    const thresholdMs = socketInfo.stallThresholdMs ?? this.stallThresholdMs;
+                    const ageMs = now - lastMessageAt;
+                    if (ageMs <= thresholdMs) return;
+                    if (now - (socketInfo.lastStallWarnAt ?? 0) >= this.stallWarnThrottleMs) {
+                        this.logger.warn(
+                            `WebSocket stall detected for ${wsUrl}; lastMessageAgeMs=${ageMs} thresholdMs=${thresholdMs}. Forcing reconnect`,
+                        );
+                        socketInfo.lastStallWarnAt = now;
+                    }
+                    socketInfo.stallCooldownUntil = now + this.stallCooldownMs;
+                    try {
+                        ws.terminate();
+                    } catch {
+                        ws.close();
+                    }
+                }, this.stallCheckMs);
             });
 
             ws.on('pong', () => {
@@ -85,6 +174,7 @@ export class WebSocketService {
 
             ws.on('message', (raw) => {
                 try {
+                    socketInfo.lastMessageAt = Date.now();
                     const msg = raw.toString();
                     const data = JSON.parse(msg);
                     socketInfo.callbacks.forEach((cb) => cb(data));
@@ -98,12 +188,21 @@ export class WebSocketService {
                     this.logger.debug(`WebSocket closed before connect (intentional): ${wsUrl}`);
                     return;
                 }
+                if (this.isTransientSocketError(err)) {
+                    const now = Date.now();
+                    if (now - this.lastTransientErrorAt >= this.transientErrorWarnThrottleMs) {
+                        this.lastTransientErrorAt = now;
+                        this.logger.warn(`WebSocket transient error on ${wsUrl}: ${err.message}`);
+                    }
+                    return;
+                }
                 this.logger.error(`WebSocket error on ${wsUrl}: ${err.message}`);
             });
 
             ws.on('close', (code, reason) => {
                 clearTimeout(timeout);
                 clearInterval(socketInfo.pingInterval);
+                clearInterval(socketInfo.stallWatchInterval);
 
                 if (!socketInfo.intentionalClose) {
                     this.logger.warn(
@@ -133,11 +232,21 @@ export class WebSocketService {
                 }
 
                 this.sockets.delete(wsUrl);
+                if (socketInfo.reconnectTimer) {
+                    clearTimeout(socketInfo.reconnectTimer);
+                    socketInfo.reconnectTimer = undefined;
+                }
 
                 if (socketInfo.intentionalClose) return;
                 if (!socketInfo.reconnecting) {
                     socketInfo.reconnecting = true;
-                    this.attemptReconnect(wsUrl, socketInfo.callbacks, socketInfo.retryCount);
+                    this.attemptReconnect(
+                        wsUrl,
+                        socketInfo.callbacks,
+                        socketInfo.openCallbacks,
+                        socketInfo.retryCount,
+                        { stallThresholdMs: socketInfo.stallThresholdMs },
+                    );
                 }
             });
         };
@@ -156,11 +265,18 @@ export class WebSocketService {
         if (!socketInfo) {
             throw new Error(`No active socket for ${wsUrl}`);
         }
+        const hasCallback = socketInfo.callbacks.some((cb) => cb === callback);
+        if (hasCallback) return;
+        if (!socketInfo.ws || typeof socketInfo.ws.once !== 'function') {
+            socketInfo.callbacks.push(callback);
+            return;
+        }
 
         if (socketInfo.ws.readyState === WebSocket.OPEN) {
             socketInfo.callbacks.push(callback);
         } else {
             socketInfo.ws.once('open', () => {
+                if (socketInfo.callbacks.some((cb) => cb === callback)) return;
                 socketInfo.callbacks.push(callback);
             });
         }
@@ -174,6 +290,13 @@ export class WebSocketService {
         const socketInfo = this.sockets.get(wsUrl);
         if (!socketInfo) {
             throw new Error(`No active socket for ${wsUrl}`);
+        }
+        const hasCallback = socketInfo.openCallbacks.some((cb) => cb === callback);
+        if (!hasCallback) {
+            socketInfo.openCallbacks.push(callback);
+        }
+        if (!socketInfo.ws || typeof socketInfo.ws.once !== 'function') {
+            return;
         }
 
         if (socketInfo.ws.readyState === WebSocket.OPEN) {
@@ -204,8 +327,15 @@ export class WebSocketService {
         if (!socketInfo) return;
 
         socketInfo.intentionalClose = true;
+        if (socketInfo.reconnectTimer) {
+            clearTimeout(socketInfo.reconnectTimer);
+            socketInfo.reconnectTimer = undefined;
+        }
         clearInterval(socketInfo.pingInterval);
-        socketInfo.ws.close();
+        clearInterval(socketInfo.stallWatchInterval);
+        if (socketInfo.ws && typeof socketInfo.ws.close === 'function') {
+            socketInfo.ws.close();
+        }
         this.sockets.delete(wsUrl);
         this.logger.log(`Disconnected from ${wsUrl}`);
     }
@@ -213,29 +343,68 @@ export class WebSocketService {
     /**
      * Автопереподключение
      */
-    private attemptReconnect(wsUrl: string, callbacks: MessageCallback[], prevRetry: number): void {
-        if (prevRetry < this.maxRetries) {
-            const delay = Math.min(this.baseDelay * Math.pow(2, prevRetry), 30000);
+    private attemptReconnect(
+        wsUrl: string,
+        callbacks: MessageCallback[],
+        openCallbacks: Array<(ws: WebSocket) => void>,
+        prevRetry: number,
+        options?: SubscribeStreamOptions,
+    ): void {
+        const nextAttempt = prevRetry + 1;
+        const maxRetriesReached = this.maxRetries > 0 && nextAttempt > this.maxRetries;
+        if (maxRetriesReached) {
             this.logger.warn(
-                `Reconnecting to ${wsUrl} in ${delay / 1000}s (attempt ${prevRetry + 1}/${this.maxRetries})`,
+                `Reconnect cap reached for ${wsUrl}; continuing retries to preserve stream availability`,
             );
-
-            setTimeout(() => {
-                const socketInfo: SocketInfo = {
-                    ws: null as any, // заменится в subscribeToStream
-                    retryCount: prevRetry + 1,
-                    reconnecting: true,
-                    callbacks,
-                };
-                this.sockets.set(wsUrl, socketInfo);
-
-                this.subscribeToStream(wsUrl).catch((err) =>
-                    this.logger.error(`Reconnect to ${wsUrl} failed: ${err.message}`),
-                );
-            }, delay);
-        } else {
-            this.logger.error(`Max reconnect attempts reached for ${wsUrl}. Giving up.`);
-            this.disconnect(wsUrl);
         }
+
+        const baseDelay = Math.min(
+            this.baseDelay * Math.pow(2, Math.min(prevRetry, 10)),
+            this.maxDelay,
+        );
+        const delay = this.withReconnectJitter(baseDelay);
+        this.logger.warn(
+            this.maxRetries > 0
+                ? `Reconnecting to ${wsUrl} in ${delay / 1000}s (attempt ${nextAttempt}/${this.maxRetries}, baseDelayMs=${baseDelay})`
+                : `Reconnecting to ${wsUrl} in ${delay / 1000}s (attempt ${nextAttempt}, unlimited, baseDelayMs=${baseDelay})`,
+        );
+
+        const reconnectTimer = setTimeout(() => {
+            const current = this.sockets.get(wsUrl);
+            if (current?.intentionalClose) return;
+            this.subscribeToStream(wsUrl, options).catch((err) =>
+                this.logger.error(`Reconnect to ${wsUrl} failed: ${err.message}`),
+            );
+        }, delay);
+        this.sockets.set(wsUrl, {
+            ws: null as any,
+            retryCount: nextAttempt,
+            reconnecting: true,
+            callbacks,
+            openCallbacks,
+            reconnectTimer,
+        });
+    }
+
+    private withReconnectJitter(baseDelayMs: number): number {
+        if (this.reconnectJitterMs <= 0) return baseDelayMs;
+        const jitterMs = Math.floor(Math.random() * (this.reconnectJitterMs + 1));
+        return baseDelayMs + jitterMs;
+    }
+
+    private isTransientSocketError(error: unknown): boolean {
+        const code = (error as { code?: unknown })?.code;
+        const message = String((error as { message?: unknown })?.message || error || '').toLowerCase();
+        return (
+            code === 'ECONNRESET'
+            || code === 'ECONNABORTED'
+            || code === 'ETIMEDOUT'
+            || code === 'EPIPE'
+            || message.includes('econnreset')
+            || message.includes('econnaborted')
+            || message.includes('socket hang up')
+            || message.includes('connection reset')
+            || message.includes('connection closed')
+        );
     }
 }

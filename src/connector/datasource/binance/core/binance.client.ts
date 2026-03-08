@@ -6,6 +6,7 @@ import {
 import Binance, { Binance as BinanceClient } from 'binance-api-node';
 import moment from 'moment';
 import { ConfigService } from '@barfinex/config';
+import { MarketType } from '@barfinex/types';
 
 @Injectable()
 export class BinanceClientService {
@@ -18,6 +19,8 @@ export class BinanceClientService {
     private resolveReady!: () => void;
 
     public api!: BinanceClient;
+    private validSpotSymbols: ReadonlySet<string> = new Set<string>();
+    private validFuturesSymbols: ReadonlySet<string> = new Set<string>();
 
     constructor(
         private readonly configService: ConfigService,
@@ -92,6 +95,8 @@ export class BinanceClientService {
                 recvWindow: 60_000,
             } as Parameters<typeof Binance>[0]);
 
+            await this.preloadExchangeInfoSymbols();
+
             try {
                 const time = await this.api.time();
                 this.logger.log(
@@ -139,5 +144,76 @@ export class BinanceClientService {
                 ),
             ),
         ]);
+    }
+
+    getValidSymbols(marketType: MarketType): ReadonlySet<string> {
+        if (marketType === MarketType.futures) {
+            return this.validFuturesSymbols.size > 0
+                ? this.validFuturesSymbols
+                : this.validSpotSymbols;
+        }
+
+        return this.validSpotSymbols;
+    }
+
+    validateBinanceSymbols(
+        marketType: MarketType,
+        symbols: string[],
+    ): { validSymbols: string[]; removedSymbols: string[] } {
+        const validSet = this.getValidSymbols(marketType);
+        const normalizedUnique: string[] = [];
+        const seen = new Set<string>();
+
+        for (const raw of symbols) {
+            const normalized = String(raw ?? '').trim().toUpperCase();
+            if (!normalized) continue;
+            if (seen.has(normalized)) continue;
+            seen.add(normalized);
+            normalizedUnique.push(normalized);
+        }
+
+        const validSymbols: string[] = [];
+        const removedSymbols: string[] = [];
+        for (const symbol of normalizedUnique) {
+            if (validSet.has(symbol)) {
+                validSymbols.push(symbol);
+            } else {
+                removedSymbols.push(symbol);
+            }
+        }
+
+        return { validSymbols, removedSymbols };
+    }
+
+    private async preloadExchangeInfoSymbols(): Promise<void> {
+        const spotSymbols = await this.loadExchangeSymbols('spot');
+        const futuresSymbols = await this.loadExchangeSymbols('futures');
+
+        this.validSpotSymbols = new Set(spotSymbols);
+        this.validFuturesSymbols = new Set(futuresSymbols);
+
+        this.logger.log(
+            `[BinanceSymbols] spot=${this.validSpotSymbols.size} futures=${this.validFuturesSymbols.size}`,
+        );
+    }
+
+    private async loadExchangeSymbols(kind: 'spot' | 'futures'): Promise<string[]> {
+        try {
+            const response =
+                kind === 'spot'
+                    ? await this.api.exchangeInfo()
+                    : await this.api.futuresExchangeInfo();
+            const symbols = (response?.symbols ?? [])
+                .map((s: any) => String(s?.symbol ?? '').trim().toUpperCase())
+                .filter((s: string) => s.length > 0);
+            return Array.from(new Set(symbols));
+        } catch (error) {
+            this.logger.warn(
+                `[BinanceSymbols] failed to load ${kind} exchangeInfo symbols: ${
+                    error instanceof Error ? error.message : String(error)
+                }`,
+            );
+            return [];
+        }
     }
 }

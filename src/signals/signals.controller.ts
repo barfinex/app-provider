@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query } from '@nestjs/common';
+import { Controller, Get, Logger, Param, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { ConnectorType, MarketType } from '@barfinex/types';
 import { SignalsService } from './signals.service';
@@ -6,6 +6,8 @@ import { SignalsService } from './signals.service';
 @ApiTags('Signals')
 @Controller('signals')
 export class SignalsController {
+    private readonly logger = new Logger(SignalsController.name);
+
     constructor(private readonly signalsService: SignalsService) { }
 
     @Get('context/:symbol')
@@ -19,7 +21,7 @@ export class SignalsController {
         @Query('candlesKey') candlesKey?: string,
         @Query('candlesMode') candlesMode?: string,
     ) {
-        return this.signalsService.buildSignalContext({
+        const ctx = await this.signalsService.buildSignalContext({
             symbol: symbol.toUpperCase(),
             connectorType: connectorType ?? ConnectorType.binance,
             marketType: marketType ?? MarketType.futures,
@@ -31,6 +33,12 @@ export class SignalsController {
             candlesKey,
             candlesMode,
         });
+        const orderbookLevels = ((ctx as any)?.orderBook?.levels?.length ?? 0) as number;
+        const tradesWindow = ((ctx as any)?.orderFlow?.windowTrades ?? 0) as number;
+        this.logger.debug(
+            `[SIGNALS] context ${symbol.toUpperCase()}: candles.h1=${ctx.candles?.h1?.length ?? 0}, orderbook=${orderbookLevels}, tradesWindow=${tradesWindow}`,
+        );
+        return ctx;
     }
 }
 

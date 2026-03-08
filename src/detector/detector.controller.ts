@@ -14,7 +14,12 @@ import { DetectorService } from './detector.service';
 import { ConnectorService } from '../connector/connector.service';
 
 import { Detector, DetectorListItem, Symbol, TimeFrame } from '@barfinex/types';
-import { ApiTags } from '@nestjs/swagger';
+import {
+    ApiOperation,
+    ApiQuery,
+    ApiResponse,
+    ApiTags,
+} from '@nestjs/swagger';
 
 @ApiTags('Detectors')
 @Controller('detectors')
@@ -23,6 +28,138 @@ export class DetectorController {
         private readonly connectorService: ConnectorService,
         private readonly detectorService: DetectorService,
     ) { }
+
+    @Get(':key/capital-efficiency/overview')
+    @ApiOperation({ summary: 'Proxy detector capital efficiency overview' })
+    @ApiQuery({ name: 'from', required: false, type: String })
+    @ApiQuery({ name: 'to', required: false, type: String })
+    @ApiQuery({ name: 'instanceId', required: false, type: String })
+    @ApiQuery({ name: 'symbol', required: false, type: String })
+    @ApiResponse({ status: 200, description: 'Capital efficiency overview' })
+    async getCapitalEfficiencyOverview(
+        @Param('key') key: string,
+        @Query('from') from?: string,
+        @Query('to') to?: string,
+        @Query('instanceId') instanceId?: string,
+        @Query('symbol') symbol?: string,
+    ) {
+        return this.detectorService.getCapitalEfficiency(key, 'overview', {
+            from,
+            to,
+            instanceId,
+            symbol,
+        });
+    }
+
+    @Get(':key/capital-efficiency/utilization')
+    @ApiOperation({ summary: 'Proxy detector capital efficiency utilization' })
+    @ApiQuery({ name: 'from', required: false, type: String })
+    @ApiQuery({ name: 'to', required: false, type: String })
+    @ApiQuery({ name: 'instanceId', required: false, type: String })
+    @ApiQuery({ name: 'symbol', required: false, type: String })
+    @ApiResponse({ status: 200, description: 'Capital efficiency utilization' })
+    async getCapitalEfficiencyUtilization(
+        @Param('key') key: string,
+        @Query('from') from?: string,
+        @Query('to') to?: string,
+        @Query('instanceId') instanceId?: string,
+        @Query('symbol') symbol?: string,
+    ) {
+        return this.detectorService.getCapitalEfficiency(key, 'utilization', {
+            from,
+            to,
+            instanceId,
+            symbol,
+        });
+    }
+
+    @Get(':key/capital-efficiency/suppression')
+    @ApiOperation({ summary: 'Proxy detector capital efficiency suppression' })
+    @ApiQuery({ name: 'from', required: false, type: String })
+    @ApiQuery({ name: 'to', required: false, type: String })
+    @ApiQuery({ name: 'instanceId', required: false, type: String })
+    @ApiQuery({ name: 'symbol', required: false, type: String })
+    @ApiResponse({ status: 200, description: 'Capital efficiency suppression' })
+    async getCapitalEfficiencySuppression(
+        @Param('key') key: string,
+        @Query('from') from?: string,
+        @Query('to') to?: string,
+        @Query('instanceId') instanceId?: string,
+        @Query('symbol') symbol?: string,
+    ) {
+        return this.detectorService.getCapitalEfficiency(key, 'suppression', {
+            from,
+            to,
+            instanceId,
+            symbol,
+        });
+    }
+
+    @Get(':key/capital-efficiency/symbols')
+    @ApiOperation({ summary: 'Proxy detector capital efficiency symbols' })
+    @ApiQuery({ name: 'from', required: false, type: String })
+    @ApiQuery({ name: 'to', required: false, type: String })
+    @ApiQuery({ name: 'instanceId', required: false, type: String })
+    @ApiQuery({ name: 'symbol', required: false, type: String })
+    @ApiResponse({ status: 200, description: 'Capital efficiency symbols' })
+    async getCapitalEfficiencySymbols(
+        @Param('key') key: string,
+        @Query('from') from?: string,
+        @Query('to') to?: string,
+        @Query('instanceId') instanceId?: string,
+        @Query('symbol') symbol?: string,
+    ) {
+        return this.detectorService.getCapitalEfficiency(key, 'symbols', {
+            from,
+            to,
+            instanceId,
+            symbol,
+        });
+    }
+
+    @Get(':key/capital-efficiency/reservations')
+    @ApiOperation({ summary: 'Proxy detector capital efficiency reservations' })
+    @ApiQuery({ name: 'from', required: false, type: String })
+    @ApiQuery({ name: 'to', required: false, type: String })
+    @ApiQuery({ name: 'instanceId', required: false, type: String })
+    @ApiQuery({ name: 'symbol', required: false, type: String })
+    @ApiResponse({ status: 200, description: 'Capital efficiency reservations' })
+    async getCapitalEfficiencyReservations(
+        @Param('key') key: string,
+        @Query('from') from?: string,
+        @Query('to') to?: string,
+        @Query('instanceId') instanceId?: string,
+        @Query('symbol') symbol?: string,
+    ) {
+        return this.detectorService.getCapitalEfficiency(key, 'reservations', {
+            from,
+            to,
+            instanceId,
+            symbol,
+        });
+    }
+
+    @Get(':key/capital-efficiency/stability')
+    @ApiOperation({ summary: 'Proxy detector capital efficiency stability' })
+    @ApiQuery({ name: 'from', required: false, type: String })
+    @ApiQuery({ name: 'to', required: false, type: String })
+    @ApiQuery({ name: 'instanceId', required: false, type: String })
+    @ApiQuery({ name: 'symbol', required: false, type: String })
+    @ApiResponse({ status: 200, description: 'Capital efficiency stability' })
+    async getCapitalEfficiencyStability(
+        @Param('key') key: string,
+        @Query('from') from?: string,
+        @Query('to') to?: string,
+        @Query('instanceId') instanceId?: string,
+        @Query('symbol') symbol?: string,
+    ) {
+        return this.detectorService.getCapitalEfficiency(key, 'stability', {
+            from,
+            to,
+            instanceId,
+            symbol,
+        });
+    }
 
     // -------------------------------------------------------
     // GET ALL DETECTORS FOR CURRENT PROVIDER

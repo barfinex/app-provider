@@ -12,6 +12,12 @@ import {
 import { ConnectorService } from '../connector/connector.service';
 import { BinanceClientService } from
     '../connector/datasource/binance/core/binance.client';
+import { normalizeTradingSymbol } from '../connector/utils/trading-symbol-sanitizer';
+
+interface BalanceStatsSnapshot {
+    rawAssetsCount: number;
+    activeAssetsCount: number;
+}
 
 @Injectable()
 export class AccountService {
@@ -24,6 +30,7 @@ export class AccountService {
 
 
     private readonly DAY = 86400000;
+    private readonly balanceStats = new Map<string, BalanceStatsSnapshot>();
 
     constructor(
         @Inject(forwardRef(() => ConnectorService))
@@ -82,6 +89,29 @@ export class AccountService {
             }
         }
 
+        const accountAny = account as unknown as Record<string, unknown>;
+        const rawAssetsCount = Number(
+            accountAny.__rawAssetsCount
+            ?? accountAny.__rawSpotBalancesCount
+            ?? accountAny.__rawFuturesAssetsCount
+            ?? account.assets?.length
+            ?? 0,
+        );
+        const activeAssetsCount = Number(
+            accountAny.__activeAssetsCount
+            ?? accountAny.__nonZeroSpotBalancesCount
+            ?? accountAny.__nonZeroFuturesAssetsCount
+            ?? account.assets?.length
+            ?? 0,
+        );
+        this.balanceStats.set(
+            `${connectorType}:${marketType}`,
+            {
+                rawAssetsCount: Number.isFinite(rawAssetsCount) ? rawAssetsCount : 0,
+                activeAssetsCount: Number.isFinite(activeAssetsCount) ? activeAssetsCount : 0,
+            },
+        );
+
         // =========================================================================
         // 🔥 ВАЖНО: ЗАПОЛНЯЕМ SYMBOLS (утраченная логика)
         // =========================================================================
@@ -99,18 +129,16 @@ export class AccountService {
             }
         });
 
-        // 2️⃣ Из активов (asset + USDT)
-        const exchangeCurrency = 'USDT';
-
-        account.assets?.forEach((asset) => {
-            const base = asset.symbol?.name;
-            if (!base) return;
-
-            const symbolName =
-                base === exchangeCurrency
-                    ? exchangeCurrency
-                    : `${base}${exchangeCurrency}`;
-
+        // 2️⃣ Из активов: только если это уже валидная торговая пара Binance.
+        const candidateAssetSymbols = (account.assets ?? [])
+            .map((asset) => normalizeTradingSymbol(asset.symbol?.name))
+            .filter(Boolean);
+        const { validSymbols: validAssetSymbols } =
+            this.binanceClient.validateBinanceSymbols(
+                marketType,
+                candidateAssetSymbols,
+            );
+        validAssetSymbols.forEach((symbolName) => {
             symbolsMap.set(symbolName, {
                 name: symbolName,
                 connectorType,
@@ -130,6 +158,13 @@ export class AccountService {
         account.symbols = Array.from(symbolsMap.values());
 
         return account;
+    }
+
+    getBalanceStats(
+        connectorType: ConnectorType,
+        marketType: MarketType,
+    ): BalanceStatsSnapshot | undefined {
+        return this.balanceStats.get(`${connectorType}:${marketType}`);
     }
 
     // =========================================================================

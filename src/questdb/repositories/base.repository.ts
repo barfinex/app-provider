@@ -28,10 +28,23 @@ export abstract class BaseRepository<T = any> {
     }
 
     // ===============================================
-    // BATCH INSERT
+    // BATCH INSERT (blocking: enqueue + flush + wait)
     // ===============================================
     async insertBatch(rows: Omit<ILPWriteOptions, 'table'>[]) {
         await this.writer.writeBatch(
+            this.channel,
+            rows.map(r => ({
+                ...r,
+                table: this.tableName,
+            }))
+        );
+    }
+
+    // ===============================================
+    // ENQUEUE BATCH (non-blocking; use after Redis publish)
+    // ===============================================
+    enqueueBatch(rows: Omit<ILPWriteOptions, 'table'>[]) {
+        this.writer.enqueueBatch(
             this.channel,
             rows.map(r => ({
                 ...r,

@@ -26,6 +26,7 @@ import { CandleModule } from '../../../candle/candle.module';
 import { QuestDBModule } from '../../../questdb/questdb.module';
 import { QuestDbIlpModule } from '../../../questdb/ilp/questdb-ilp.module';
 import { EventSinkModule } from '../../../questdb/event-sink/event-sink.module';
+import { ProviderMarketdataMetricsService } from '../../../runtime/provider-marketdata-metrics.service';
 
 @Module({
     imports: [
@@ -54,6 +55,7 @@ import { EventSinkModule } from '../../../questdb/event-sink/event-sink.module';
         // WS
         BinanceWsManager,
         BinanceSubscriptionService,
+        ProviderMarketdataMetricsService,
 
         // FACADE
         BinanceService,
@@ -66,6 +68,8 @@ import { EventSinkModule } from '../../../questdb/event-sink/event-sink.module';
     exports: [
         BinanceService,
         BinanceClientService,
+        BinanceRedisService,
+        BinanceWsManager,
     ],
 })
 export class BinanceModule { }

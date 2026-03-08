@@ -547,6 +547,43 @@ export class DetectorService {
         return {};
     }
 
+    async getCapitalEfficiency(
+        key: string,
+        endpoint:
+            | 'overview'
+            | 'utilization'
+            | 'suppression'
+            | 'symbols'
+            | 'reservations'
+            | 'stability',
+        query?: {
+            from?: string;
+            to?: string;
+            instanceId?: string;
+            symbol?: string;
+        },
+    ): Promise<any> {
+        const detector = await this.getDetector({ key });
+        const detectorApi = detector?.restApiUrl?.trim();
+        if (!detectorApi) {
+            throw new ForbiddenException(
+                `Detector "${key}" does not expose restApiUrl`,
+            );
+        }
+
+        const url = `${detectorApi}/detector/capital-efficiency/${endpoint}`;
+        const request = this.http
+            .get(url, { params: query ?? {} })
+            .pipe(map((res) => res.data))
+            .pipe(
+                catchError((err) => {
+                    throw new ForbiddenException(`${url} ${err}`);
+                }),
+            );
+
+        return lastValueFrom(request);
+    }
+
     // -------------------------------------------------------
     // LEGACY UPDATE
     // -------------------------------------------------------

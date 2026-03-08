@@ -8,13 +8,14 @@ import { AccountModule } from './account/account.module';
 import { OrderModule } from './order/order.module';
 import { SubscriptionModule } from './subscription/subscription.module';
 import { ConnectorModule } from './connector/connector.module';
+import { BinanceModule } from './connector/datasource/binance/binance.module';
 import { DetectorModule } from './detector/detector.module';
 import { AssetModule } from './asset/asset.module';
 import { SymbolModule } from './symbol/symbol.module';
 import { PortainerModule } from './portainer/portainer.module';
 
 import { ProviderWsBridgeModule } from '@barfinex/provider-ws-bridge';
-import { SubscriptionType } from '@barfinex/types';
+import { resolveWsBridgeSubscriptions } from './ws-events/ws-bridge-channel-allowlist';
 
 import { AppController } from './app.controller';
 import { WsHealthGateway } from './ws-health.gateway';
@@ -33,6 +34,14 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { WsEventsModule } from './ws-events/ws-events.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { ProviderApiTokenGuard } from './auth/provider-api-token.guard';
+import { AdvisorProxyModule } from './advisor-proxy/advisor-proxy.module';
+import { DetectorProxyModule } from './detector-proxy/detector-proxy.module';
+import { InspectorProxyModule } from './inspector-proxy/inspector-proxy.module';
+import { ProviderGatewayModule } from './provider-gateway/provider-gateway.module';
+import { ProviderRuntimeHealthController } from './runtime/provider-runtime-health.controller';
+import { ProviderMarketQualityController } from './runtime/provider-market-quality.controller';
+import { ProviderRuntimeHealthService } from './runtime/provider-runtime-health.service';
+import { ProviderMarketdataMetricsService } from './runtime/provider-marketdata-metrics.service';
 
 @Module({
   imports: [
@@ -66,8 +75,7 @@ import { ProviderApiTokenGuard } from './auth/provider-api-token.guard';
         host: process.env.REDIS_HOST || 'localhost',
         port: Number(process.env.REDIS_PORT || 6379),
       },
-      subscriptions: (Object.values(SubscriptionType) as (string | number)[])
-        .filter((v): v is string => typeof v === 'string'),
+      subscriptions: resolveWsBridgeSubscriptions(),
       parseJson: true,
       log: true,
     }),
@@ -82,17 +90,24 @@ import { ProviderApiTokenGuard } from './auth/provider-api-token.guard';
     SignalsModule,
     AppRegistryModule,
     ProxyModule,
+    AdvisorProxyModule,
+    DetectorProxyModule,
+    InspectorProxyModule,
+    ProviderGatewayModule,
     WsEventsModule,
     DashboardModule,
     OrderModule,
+    BinanceModule,
     ConnectorModule,
     SubscriptionModule,
     ReplayModule,
   ],
 
-  controllers: [AppController],
+  controllers: [AppController, ProviderRuntimeHealthController, ProviderMarketQualityController],
   providers: [
     WsHealthGateway,
+    ProviderRuntimeHealthService,
+    ProviderMarketdataMetricsService,
     {
       provide: APP_GUARD,
       useClass: ProviderApiTokenGuard,

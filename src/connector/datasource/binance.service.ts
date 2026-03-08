@@ -34,7 +34,6 @@
 //     FuturesIncomeResult,
 //     Binance as BinanceClient
 // } from 'binance-api-node';
-// import { ClientProxy, Transport, ClientProxyFactory, RedisOptions } from '@nestjs/microservices';
 // import {
 //     Order,
 //     DataSource,
@@ -148,8 +147,8 @@
 
 //         this.logger.log(`Connecting to Redis on ${tcpHost}:${tcpPort}`);
 
-//         this.client = ClientProxyFactory.create({
-//             transport: Transport.REDIS,
+//         this.client = createLegacyClient({
+//             transport: legacy redis transport,
 //             options: { host: tcpHost, port: tcpPort },
 //         } as RedisOptions);
 

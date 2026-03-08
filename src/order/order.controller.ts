@@ -1,9 +1,11 @@
 import {
     BadRequestException,
     Body,
+    ConflictException,
     Controller,
     Delete,
     Get,
+    Logger,
     Param,
     Post,
     Put,
@@ -15,6 +17,7 @@ import {
 import { ApiTags } from '@nestjs/swagger';
 
 import { OrderService } from './order.service';
+import { OrderIdempotencyService } from './order-idempotency.service';
 import { DetectorService } from '../detector/detector.service';
 import { ConnectorService } from '../connector/connector.service';
 
@@ -23,8 +26,11 @@ import { ConnectorType, MarketType, Order, OrderSourceType, Symbol } from '@barf
 @ApiTags('Orders')
 @Controller('orders')
 export class OrderController {
+    private readonly logger = new Logger(OrderController.name);
+
     constructor(
         private readonly orderService: OrderService,
+        private readonly orderIdempotencyService: OrderIdempotencyService,
 
         @Inject(forwardRef(() => DetectorService))
         private readonly detectorService: DetectorService,
@@ -38,7 +44,38 @@ export class OrderController {
     // ========================================================
     @Post()
     async create(@Body('order') order: Order) {
-        return this.orderService.openOrder(order);
+        const idempotencyKey = (order as Order & { idempotencyKey?: string })?.idempotencyKey;
+        if (!idempotencyKey) {
+            return this.orderService.openOrder(order);
+        }
+
+        const processingStarted = await this.orderIdempotencyService.tryStartProcessing(idempotencyKey);
+
+        if (processingStarted) {
+            this.logger.log(`[provider-idempotency] processing_started key=${idempotencyKey}`);
+
+            const result = await this.orderService.openOrder(order);
+            await this.orderIdempotencyService.setFinalResponse(idempotencyKey, result);
+            return result;
+        }
+
+        const replay = await this.orderIdempotencyService.getFinalResponse<Order>(idempotencyKey);
+        if (replay) {
+            this.logger.log(`[provider-idempotency] replay key=${idempotencyKey}`);
+            return replay;
+        }
+
+        const replayAfterWait = await this.orderIdempotencyService.waitForFinalResponse<Order>(idempotencyKey, {
+            maxWaitMs: 1200,
+            pollIntervalMs: 100,
+        });
+        if (replayAfterWait) {
+            this.logger.log(`[provider-idempotency] replay key=${idempotencyKey}`);
+            return replayAfterWait;
+        }
+
+        this.logger.warn(`[provider-idempotency] still_processing key=${idempotencyKey}`);
+        throw new ConflictException('Order with this idempotencyKey is still processing. Retry later.');
     }
 
     // ========================================================

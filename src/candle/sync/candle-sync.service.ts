@@ -47,6 +47,24 @@ type LookbackDaysConfig = Partial<Record<TimeFrame, number>>;
 @Injectable()
 export class CandleSyncService implements OnModuleInit {
   private readonly logger = new Logger(CandleSyncService.name);
+  private static readonly WARMUP_WORKERS = 3;
+  private static readonly WARMUP_REQUEST_PACE_MS = 100;
+  private static readonly WARMUP_TASK_WARN_LIMIT = 500;
+  private static readonly WARMUP_INTERVALS: TimeFrame[] = [
+    TimeFrame.min1,
+    TimeFrame.min5,
+    TimeFrame.min15,
+    TimeFrame.min30,
+    TimeFrame.h1,
+    TimeFrame.h2,
+    TimeFrame.h4,
+    TimeFrame.day,
+  ];
+  private static readonly MARKET_QUALITY_REQUIRED_INTERVALS: TimeFrame[] = [
+    TimeFrame.h1,
+    TimeFrame.h4,
+    TimeFrame.day,
+  ];
   private readonly candleVerbose = process.env.CANDLE_VERBOSE_LOGS === 'true';
   private readonly warmupVerbose = this.candleVerbose;
   private readonly warmupIntervalLogs = this.candleVerbose;
@@ -126,22 +144,6 @@ export class CandleSyncService implements OnModuleInit {
     return i > 0 ? i : null;
   }
 
-  private envLookbackByInterval(interval: TimeFrame): number | null {
-    const byTf: Partial<Record<TimeFrame, string>> = {
-      [TimeFrame.min1]: process.env.CANDLES_LOOKBACK_MIN1_DAYS,
-      [TimeFrame.min5]: process.env.CANDLES_LOOKBACK_MIN5_DAYS,
-      [TimeFrame.min15]: process.env.CANDLES_LOOKBACK_MIN15_DAYS,
-      [TimeFrame.min30]: process.env.CANDLES_LOOKBACK_MIN30_DAYS,
-      [TimeFrame.h1]: process.env.CANDLES_LOOKBACK_H1_DAYS,
-      [TimeFrame.h2]: process.env.CANDLES_LOOKBACK_H2_DAYS,
-      [TimeFrame.h4]: process.env.CANDLES_LOOKBACK_H4_DAYS,
-      [TimeFrame.day]: process.env.CANDLES_LOOKBACK_DAY_DAYS,
-      [TimeFrame.week]: process.env.CANDLES_LOOKBACK_WEEK_DAYS,
-      [TimeFrame.month]: process.env.CANDLES_LOOKBACK_MONTH_DAYS,
-    };
-    return this.parsePositiveInt(byTf[interval]);
-  }
-
   private configLookbackByInterval(interval: TimeFrame): number | null {
     const cfg = this.configService.getConfig()?.provider?.candleSync;
     const map = (cfg?.lookbackDays ?? {}) as LookbackDaysConfig;
@@ -152,15 +154,12 @@ export class CandleSyncService implements OnModuleInit {
 
   private getLookbackDays(interval: TimeFrame): number {
     return (
-      this.envLookbackByInterval(interval) ??
       this.configLookbackByInterval(interval) ??
       CandleSyncService.DEFAULT_LOOKBACK_DAYS[interval]
     );
   }
 
   private getOverlapCandles(): number {
-    const envValue = this.parsePositiveInt(process.env.CANDLES_BACKFILL_OVERLAP_CANDLES);
-    if (envValue != null) return Math.min(5, envValue);
     const cfgValue = this.parsePositiveInt(
       this.configService.getConfig()?.provider?.candleSync?.overlapCandles,
     );
@@ -215,6 +214,10 @@ export class CandleSyncService implements OnModuleInit {
       if (name.length < 6) return false;
       return true;
     });
+  }
+
+  private sleep(msDelay: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, msDelay));
   }
 
   @OnEvent(CANDLE_SUBSCRIPTIONS_UPDATED)
@@ -459,7 +462,29 @@ export class CandleSyncService implements OnModuleInit {
       requestFn = null;
     }
 
-    for (const interval of intervals) {
+    const warmupIntervals = Array.from(
+      new Set<TimeFrame>([
+        ...intervals.filter((interval) =>
+          CandleSyncService.WARMUP_INTERVALS.includes(interval),
+        ),
+        ...CandleSyncService.MARKET_QUALITY_REQUIRED_INTERVALS,
+      ]),
+    );
+    if (warmupIntervals.length === 0) {
+      this.logger.warn(
+        `[CandleWarmup] skipped_no_warmup_intervals configured=${intervals.join(',') || 'none'} allowed=${CandleSyncService.WARMUP_INTERVALS.join(',')}`,
+      );
+      this.warmupGate.setWarmupCompleted(true);
+      return;
+    }
+
+    const tasks: Array<{
+      symbol: Symbol;
+      interval: TimeFrame;
+      lookbackDays: number;
+    }> = [];
+
+    for (const interval of warmupIntervals) {
       const lookbackDays =
         warmupDaysOverride != null
           ? warmupDaysOverride
@@ -475,24 +500,56 @@ export class CandleSyncService implements OnModuleInit {
         );
       }
       for (const s of symbols) {
-        await this.warmupOneSymbolInterval(
-          connectorType,
-          marketType,
-          s,
-          interval,
-          requestFn,
-          now,
-          lookbackDays,
-        );
+        tasks.push({ symbol: s, interval, lookbackDays });
       }
     }
 
+    const totalTasks = tasks.length;
+    const workers = Math.max(1, CandleSyncService.WARMUP_WORKERS);
+    this.logger.log(`[CandleWarmup] queue_size=${totalTasks} workers=${workers}`);
+    if (totalTasks > CandleSyncService.WARMUP_TASK_WARN_LIMIT) {
+      this.logger.warn(
+        `[CandleWarmupProtection] task_count_exceeds_limit tasks=${totalTasks} limit=${CandleSyncService.WARMUP_TASK_WARN_LIMIT}`,
+      );
+    }
+
+    let nextTaskIndex = 0;
+    let progress = 0;
+    const runWorker = async (): Promise<void> => {
+      while (true) {
+        const taskIndex = nextTaskIndex;
+        nextTaskIndex += 1;
+        if (taskIndex >= totalTasks) return;
+
+        const task = tasks[taskIndex];
+        const symbolName = typeof task.symbol === 'string' ? task.symbol : task.symbol.name;
+        progress += 1;
+        this.logger.log(
+          `[CandleWarmup] symbol=${symbolName} interval=${task.interval} task=${progress}/${totalTasks}`,
+        );
+
+        await this.warmupOneSymbolInterval(
+          connectorType,
+          marketType,
+          task.symbol,
+          task.interval,
+          requestFn,
+          now,
+          task.lookbackDays,
+        );
+        await this.sleep(CandleSyncService.WARMUP_REQUEST_PACE_MS);
+      }
+    };
+
+    const workerCount = Math.min(workers, Math.max(1, totalTasks));
+    await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
+
     this.logger.log(
-      `Warmup done: ${connectorType}:${marketType}, ${symbols.length} symbols, ${intervals.length} intervals`,
+      `Warmup done: ${connectorType}:${marketType}, ${symbols.length} symbols, ${warmupIntervals.length} intervals`,
     );
     this.warmupGate.setWarmupCompleted(true);
     this.logger.log(
-      `[Warmup] Key completed: ${connectorType}:${marketType} symbols=${symbols.length} intervals=${intervals.length}`,
+      `[Warmup] Key completed: ${connectorType}:${marketType} symbols=${symbols.length} intervals=${warmupIntervals.length}`,
     );
   }
 

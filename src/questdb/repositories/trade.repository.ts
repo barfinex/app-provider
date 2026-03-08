@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { BaseRepository } from './base.repository';
 import { QuestDBWriteService } from '../questdb-write.service';
 import { QuestDBQueryService } from '../questdb-query.service';
@@ -12,6 +12,8 @@ export interface TradeEntity {
 
 @Injectable()
 export class TradeRepository extends BaseRepository<TradeEntity> {
+    private readonly logger = new Logger(TradeRepository.name);
+
     constructor(writer: QuestDBWriteService, reader: QuestDBQueryService) {
         super('trades', writer, reader);
     }
@@ -19,13 +21,15 @@ export class TradeRepository extends BaseRepository<TradeEntity> {
     async getTrades(symbol: string, limit = 200) {
         symbol = symbol.replace(/'/g, "''");
 
-        return this.query(`
+        const rows = await this.query(`
             SELECT *
             FROM trades
             WHERE symbol='${symbol}'
             ORDER BY ts DESC
             LIMIT ${limit}
         `);
+        this.logger.debug(`[TRADES] rows=${rows.length} symbol=${symbol}`);
+        return rows;
     }
 
 }

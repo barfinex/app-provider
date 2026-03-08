@@ -5,6 +5,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { OrderController } from './order.controller';
 import { OrderService } from './order.service';
 import { OrderRepository } from './order.repository';
+import { OrderIdempotencyService } from './order-idempotency.service';
 
 import { OrderEventAdapter } from '../questdb/event-sink/adapters/order.adapter';
 
@@ -33,6 +34,7 @@ import { EventSinkModule } from '../questdb/event-sink/event-sink.module';
 
     providers: [
         OrderService,
+        OrderIdempotencyService,
         OrderRepository,
         OrderEventAdapter,
     ],

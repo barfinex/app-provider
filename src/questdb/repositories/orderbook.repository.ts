@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { BaseRepository } from './base.repository';
 import { QuestDBWriteService } from '../questdb-write.service';
 import { QuestDBQueryService } from '../questdb-query.service';
@@ -12,6 +12,8 @@ export interface OrderBookLevelEntity {
 
 @Injectable()
 export class OrderBookRepository extends BaseRepository<OrderBookLevelEntity> {
+    private readonly logger = new Logger(OrderBookRepository.name);
+
     constructor(writer: QuestDBWriteService, reader: QuestDBQueryService) {
         super('orderbook_levels', writer, reader);
     }
@@ -19,12 +21,19 @@ export class OrderBookRepository extends BaseRepository<OrderBookLevelEntity> {
     async getLatest(symbol: string) {
         symbol = symbol.replace(/'/g, "''");
 
-        return this.query(`
-            SELECT *
+        const rows = await this.query(`
+            WITH latest_snapshot AS (
+                SELECT max(ts) AS snapshot_ts
+                FROM orderbook_levels
+                WHERE symbol='${symbol}'
+            )
+            SELECT symbol, side, price, volume, ts
             FROM orderbook_levels
-            LATEST BY ts
             WHERE symbol='${symbol}'
+              AND ts = (SELECT snapshot_ts FROM latest_snapshot)
         `);
+        this.logger.debug(`[ORDERBOOK] rows=${rows.length} symbol=${symbol}`);
+        return rows;
     }
 
 }

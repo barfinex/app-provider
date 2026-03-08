@@ -1,0 +1,61 @@
+import { SubscriptionType } from '@barfinex/types';
+
+/**
+ * Explicit websocket-facing channel allowlist for Provider WS bridge.
+ * Internal request channels and enum aliases are intentionally excluded.
+ */
+export const WS_BRIDGE_CHANNEL_ALLOWLIST: readonly SubscriptionType[] = [
+  SubscriptionType.PROVIDER_MARKETDATA_TRADE,
+  SubscriptionType.PROVIDER_MARKETDATA_ORDERBOOK,
+  SubscriptionType.PROVIDER_MARKETDATA_CANDLE,
+  SubscriptionType.PROVIDER_ACCOUNT_EVENT,
+  SubscriptionType.PROVIDER_ORDER_CREATE,
+  SubscriptionType.PROVIDER_ORDER_CLOSE,
+  SubscriptionType.PROVIDER_SYMBOLS,
+  SubscriptionType.PROVIDER_SYMBOL_PRICES,
+  SubscriptionType.INSPECTOR_TREND_DETECTED,
+  SubscriptionType.INSPECTOR_RANGE_DETECTED,
+  SubscriptionType.INSPECTOR_VOLATILITY_SPIKE,
+  SubscriptionType.INSPECTOR_LIQUIDITY_DROPPED,
+  SubscriptionType.INSPECTOR_DATA_GAP_DETECTED,
+  SubscriptionType.INSPECTOR_DATA_OUTLIER_DETECTED,
+  SubscriptionType.INSPECTOR_DATA_MATURITY_UPDATE,
+  SubscriptionType.INSPECTOR_RISK_LIMIT_BREACH,
+  SubscriptionType.INSPECTOR_RISK_MARGIN_UPDATE,
+  SubscriptionType.INSPECTOR_RISK_KILL_SWITCH,
+  SubscriptionType.INSPECTOR_TRADE_OUTCOME,
+  SubscriptionType.DETECTOR_SIGNAL_GENERATED,
+  SubscriptionType.DETECTOR_SIGNAL_UPDATED,
+  SubscriptionType.DETECTOR_SIGNAL_INVALIDATED,
+  SubscriptionType.DETECTOR_POSITION_OPEN_REQUEST,
+  SubscriptionType.DETECTOR_POSITION_CLOSE_REQUEST,
+  SubscriptionType.DETECTOR_POSITION_REDUCE_REQUEST,
+  SubscriptionType.DETECTOR_POSITION_FLIP_REQUEST,
+  SubscriptionType.ADVISOR_DECISION_RESPONSE,
+  SubscriptionType.ADVISOR_DECISION_MADE,
+  SubscriptionType.ADVISOR_SIGNAL_GENERATED,
+  SubscriptionType.ADVISOR_EXECUTION_INTENT_OPEN,
+  SubscriptionType.ADVISOR_EXECUTION_INTENT_CLOSE,
+  SubscriptionType.ADVISOR_EXECUTION_INTENT_REDUCE,
+  SubscriptionType.ADVISOR_EXECUTION_INTENT_FLIP,
+  SubscriptionType.ADVISOR_AUTONOMOUS_CYCLE_STARTED,
+  SubscriptionType.ADVISOR_AUTONOMOUS_CYCLE_COMPLETED,
+  SubscriptionType.ADVISOR_DECISION_CONTEXT_SNAPSHOT,
+  SubscriptionType.ADVISOR_CONVICTION_SNAPSHOT,
+  SubscriptionType.ADVISOR_CONVICTION_CALIBRATION_SNAPSHOT,
+  SubscriptionType.ADVISOR_PORTFOLIO_ALLOCATION_SNAPSHOT,
+  SubscriptionType.ADVISOR_PORTFOLIO_CORRELATION_SNAPSHOT,
+  SubscriptionType.ADVISOR_REGIME_CAPITAL_ROTATION_SNAPSHOT,
+  SubscriptionType.ADVISOR_NET_EXPOSURE_SNAPSHOT,
+  SubscriptionType.ADVISOR_FACTOR_EXPOSURE_SNAPSHOT,
+  SubscriptionType.ADVISOR_PORTFOLIO_RISK_MODE_SNAPSHOT,
+  SubscriptionType.ADVISOR_PERFORMANCE_FEEDBACK_PROCESSED,
+  SubscriptionType.ADVISOR_OUTCOME_ATTRIBUTION_SNAPSHOT,
+  SubscriptionType.ADVISOR_CONFIDENCE_LOW,
+  SubscriptionType.ADVISOR_MODEL_SWITCHED,
+  SubscriptionType.ADVISOR_HALLUCINATION_DETECTED,
+];
+
+export function resolveWsBridgeSubscriptions(): string[] {
+  return [...new Set(WS_BRIDGE_CHANNEL_ALLOWLIST)];
+}

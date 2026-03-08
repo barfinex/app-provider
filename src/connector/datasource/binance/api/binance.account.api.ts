@@ -24,11 +24,61 @@ import { BinanceClientService } from '../core/binance.client';
 @Injectable()
 export class BinanceAccountApi {
     private readonly connectorType = ConnectorType.binance;
+    private readonly accountPayloadLogThrottleMs = Math.max(
+        1_000,
+        Number(process.env.ACCOUNT_PAYLOAD_LOG_THROTTLE_MS || 5_000),
+    );
+    private lastFuturesPayloadLogAt = 0;
 
     constructor(
         private readonly client: BinanceClientService,
         private readonly configService: ConfigService,
     ) { }
+
+    private toFiniteNumber(value: unknown): number {
+        const n = Number(value);
+        return Number.isFinite(n) ? n : 0;
+    }
+
+    private filterActiveFuturesPositions<T extends { positionAmt?: string | number }>(
+        positions: T[],
+    ): T[] {
+        return positions.filter((position) => Math.abs(this.toFiniteNumber(position.positionAmt)) > 0);
+    }
+
+    private filterActiveFuturesAssets<
+        T extends {
+            walletBalance?: string | number;
+            availableBalance?: string | number;
+            crossWalletBalance?: string | number;
+        },
+    >(assets: T[]): T[] {
+        return assets.filter((asset) => {
+            const walletBalance = this.toFiniteNumber(asset.walletBalance);
+            const availableBalance = this.toFiniteNumber(asset.availableBalance);
+            const crossWalletBalance = this.toFiniteNumber(asset.crossWalletBalance);
+            return (
+                Math.abs(walletBalance) > 0
+                || Math.abs(availableBalance) > 0
+                || Math.abs(crossWalletBalance) > 0
+            );
+        });
+    }
+
+    private logAccountPayloadSnapshot(
+        marketType: MarketType,
+        rawPositions: number,
+        activePositions: number,
+        rawAssets: number,
+        activeAssets: number,
+    ): void {
+        const now = Date.now();
+        if (now - this.lastFuturesPayloadLogAt < this.accountPayloadLogThrottleMs) return;
+        this.lastFuturesPayloadLogAt = now;
+        console.log(
+            `[AccountPayload] market=${marketType} raw_positions=${rawPositions} active_positions=${activePositions} raw_assets=${rawAssets} active_assets=${activeAssets}`,
+        );
+    }
 
     async getAssetsInfo(
         marketType: MarketType,
@@ -76,11 +126,7 @@ export class BinanceAccountApi {
                 const pricesFutures = await api.futuresPrices();
                 const accountInfoFutures = await api.futuresAccountInfo();
 
-                const assets = accountInfoFutures.assets.filter(
-                    q =>
-                        parseFloat(q.walletBalance) !== 0 ||
-                        parseFloat(q.availableBalance) !== 0,
-                );
+                const assets = this.filterActiveFuturesAssets(accountInfoFutures.assets);
 
                 assets.forEach(element => {
                     result.assets.push({
@@ -101,9 +147,7 @@ export class BinanceAccountApi {
                     });
                 });
 
-                const positions = accountInfoFutures.positions.filter(
-                    q => parseFloat(q.positionAmt) !== 0,
-                );
+                const positions = this.filterActiveFuturesPositions(accountInfoFutures.positions);
 
                 positions.forEach(element => {
                     result.positions.push({
@@ -121,6 +165,13 @@ export class BinanceAccountApi {
                         lastPrice: Number(pricesFutures[element.symbol]),
                     });
                 });
+                this.logAccountPayloadSnapshot(
+                    marketType,
+                    accountInfoFutures.positions.length,
+                    positions.length,
+                    accountInfoFutures.assets.length,
+                    assets.length,
+                );
                 break;
             }
         }
@@ -153,6 +204,7 @@ export class BinanceAccountApi {
             symbols: [],
             isActive: false,
         };
+        const resultMeta = result as unknown as Record<string, unknown>;
 
         let startIncomeTime = Number(
             moment.utc().subtract(1, 'days').format('x'),
@@ -183,6 +235,14 @@ export class BinanceAccountApi {
                     console.log(
                         `[Account][SPOT] non-zero balances count=${balances.length}`,
                     );
+                    resultMeta.__rawSpotBalancesCount =
+                        accountInfo.balances.length;
+                    resultMeta.__nonZeroSpotBalancesCount =
+                        balances.length;
+                    resultMeta.__rawAssetsCount =
+                        accountInfo.balances.length;
+                    resultMeta.__activeAssetsCount =
+                        balances.length;
 
                     balances.forEach(element => {
                         const price =
@@ -232,13 +292,8 @@ export class BinanceAccountApi {
                         `[Account][FUTURES] raw assets=${accountInfo.assets.length}, positions=${accountInfo.positions.length}`,
                     );
 
-                    accountInfo.assets
-                        .filter(
-                            q =>
-                                Number(q.walletBalance) !== 0 ||
-                                Number(q.availableBalance) !== 0,
-                        )
-                        .forEach(element => {
+                    const activeAssets = this.filterActiveFuturesAssets(accountInfo.assets);
+                    activeAssets.forEach(element => {
                             const price =
                                 element.asset === currency
                                     ? 1
@@ -263,14 +318,21 @@ export class BinanceAccountApi {
                                 ],
                             });
                         });
+                    resultMeta.__rawFuturesAssetsCount =
+                        accountInfo.assets.length;
+                    resultMeta.__nonZeroFuturesAssetsCount =
+                        result.assets.length;
+                    resultMeta.__rawAssetsCount =
+                        accountInfo.assets.length;
+                    resultMeta.__activeAssetsCount =
+                        result.assets.length;
 
                     console.log(
                         `[Account][FUTURES] assets after filter=${result.assets.length}`,
                     );
 
-                    accountInfo.positions
-                        .filter(q => parseFloat(q.positionAmt) !== 0)
-                        .forEach(element => {
+                    const activePositions = this.filterActiveFuturesPositions(accountInfo.positions);
+                    activePositions.forEach(element => {
                             if (!result.symbols.find(s => s.name === element.symbol)) {
                                 result.symbols.push({ name: element.symbol });
                             }
@@ -292,6 +354,13 @@ export class BinanceAccountApi {
                                 ),
                             });
                         });
+                    this.logAccountPayloadSnapshot(
+                        marketType,
+                        accountInfo.positions.length,
+                        activePositions.length,
+                        accountInfo.assets.length,
+                        activeAssets.length,
+                    );
 
                     console.log(
                         `[Account][FUTURES] positions=${result.positions.length}, symbols=${result.symbols.length}`,

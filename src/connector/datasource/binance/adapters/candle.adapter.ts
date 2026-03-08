@@ -23,6 +23,7 @@ export interface CandleAdapterDeps {
 type BinanceCandleSafe = Partial<BinanceCandle> & {
     symbol?: string;
     startTime?: number;
+    closeTime?: number;
     isFinal?: boolean;
     open?: string | number;
     high?: string | number;
@@ -59,6 +60,9 @@ export function createCandleAdapter(deps: CandleAdapterDeps) {
 
             const symbol = msg.symbol;
             const startTime = msg.startTime;
+            const closeTime = typeof msg.closeTime === 'number' && Number.isFinite(msg.closeTime)
+                ? msg.closeTime
+                : undefined;
 
             if (!symbol || typeof symbol !== 'string') return;
             if (typeof startTime !== 'number' || !Number.isFinite(startTime)) return;
@@ -100,6 +104,7 @@ export function createCandleAdapter(deps: CandleAdapterDeps) {
                 time: startTime,
                 symbol: { name: symbol },
                 interval,
+                raw: closeTime === undefined ? msg : { ...msg, closeTime },
             };
 
             // уведомляем подписчиков (если handler действительно функция)

@@ -1,71 +1,303 @@
 import {
-    Injectable,
-    InternalServerErrorException,
-    Logger,
-    OnModuleInit,
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
 } from '@nestjs/common';
-import {
-    ClientProxy,
-    ClientProxyFactory,
-    Transport,
-    RedisOptions,
-} from '@nestjs/microservices';
-import { SubscriptionType } from '@barfinex/types';
+import { EventBusService } from '@barfinex/event-bus';
+import { EventMessageByType, SubscriptionType } from '@barfinex/types';
+import { randomUUID } from 'crypto';
+import { Counter, Gauge, Histogram, register } from 'prom-client';
+
+type QueuedEmitEvent = {
+  pattern: SubscriptionType;
+  payload: Record<string, unknown>;
+};
 
 @Injectable()
-export class BinanceRedisService implements OnModuleInit {
-    private readonly logger = new Logger(BinanceRedisService.name);
+export class BinanceRedisService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(BinanceRedisService.name);
+  private readonly debugEnabled = process.env.EVENTBUS_DEBUG === 'true';
+  private readonly eventSource = process.env.SERVICE_NAME || 'provider';
+  private readonly emitQueueMaxSize = 1_000;
+  private readonly emitQueue: QueuedEmitEvent[] = [];
+  private readonly disconnectedLatestByPattern = new Map<SubscriptionType, Record<string, unknown>>();
+  private readonly healthIntervalMs = 10_000;
+  private readonly emitErrorCooldownMs = Math.max(
+    250,
+    Number(process.env.REDIS_EMIT_ERROR_COOLDOWN_MS || 5_000),
+  );
+  private readonly emitLogThrottleMs = Math.max(
+    250,
+    Number(process.env.REDIS_EMIT_DEBUG_THROTTLE_MS || 1_000),
+  );
+  private readonly emitDisconnectedWarnThrottleMs = Math.max(
+    1_000,
+    Number(process.env.REDIS_EMIT_QUEUE_WARN_THROTTLE_MS || 5_000),
+  );
 
-    public client!: ClientProxy;
+  public isEmitToRedisEnabled = true;
+  private clientConnected = true;
+  private droppedQueuedEvents = 0;
+  private disconnectedBufferOverwriteCount = 0;
+  private flushInFlight = false;
+  private emitSuspendedUntil = 0;
+  private healthInterval?: NodeJS.Timeout;
+  private flushInterval?: NodeJS.Timeout;
+  private lastEmitLogAt = 0;
+  private lastEmitDisconnectedWarnAt = 0;
+  private readonly publishErrorsTotal: Counter<string>;
+  private readonly publishLatencyMs: Histogram<string>;
+  private readonly emitQueueSizeGauge: Gauge<string>;
+  private readonly consumerLagMs: Histogram<string>;
+  private lastObservedConsumerLagMs = 0;
 
-    public isEmitToRedisEnabled = true;
+  constructor(private readonly eventBus: EventBusService) {
+    this.publishErrorsTotal = this.getOrCreatePublishErrorsCounter();
+    this.publishLatencyMs = this.getOrCreatePublishLatencyHistogram();
+    this.emitQueueSizeGauge = this.getOrCreateEmitQueueGauge();
+    this.consumerLagMs = this.getOrCreateConsumerLagHistogram();
+  }
 
-    async onModuleInit() {
-        /* === 🧠 Подключение к Redis === */
-        const tcpHost = process.env.REDIS_HOST || 'localhost';
-        const tcpPort = Number(process.env.REDIS_PORT ?? '6379');
+  async onModuleInit(): Promise<void> {
+    const port = Number(process.env.REDIS_PORT ?? '6379');
+    if (Number.isNaN(port) || port <= 0 || port > 65535) {
+      this.logger.error(`Invalid Redis port: ${port}`);
+      throw new InternalServerErrorException('Invalid Redis port');
+    }
+    this.clientConnected = true;
+    this.updateRedisQueueMetrics();
+    this.startHealthDiagnostics();
+    this.startFlushLoop();
+  }
 
-        if (isNaN(tcpPort) || tcpPort <= 0 || tcpPort > 65535) {
-            this.logger.error(`Invalid Redis port: ${tcpPort}`);
-            throw new InternalServerErrorException('Invalid Redis port');
-        }
+  emit<TPayload extends object>(pattern: SubscriptionType, data: TPayload): void {
+    if (!this.isEmitToRedisEnabled) return;
+    const payload = {
+      ...data,
+      metadata: this.normalizeEventMetadata(
+        (data as { metadata?: EventMessageByType<SubscriptionType>['metadata'] }).metadata,
+      ),
+    };
+    const now = Date.now();
+    const emitSuspended = now < this.emitSuspendedUntil;
+    if (emitSuspended) {
+      this.publishErrorsTotal.inc();
+      if (now - this.lastEmitDisconnectedWarnAt >= this.emitDisconnectedWarnThrottleMs) {
+        this.lastEmitDisconnectedWarnAt = now;
+        this.logger.warn(
+          `[RedisEmitSkip] pattern=${String(pattern)} suspended=true buffered_patterns=${this.disconnectedLatestByPattern.size}`,
+        );
+      }
+      this.bufferDisconnectedEmitEvent(pattern, payload as Record<string, unknown>);
+      return;
+    }
+    this.enqueueEmitEvent(pattern, payload as Record<string, unknown>);
+    void this.flushQueuedEvents();
+  }
 
-        this.logger.log(`Connecting to Redis on ${tcpHost}:${tcpPort}`);
+  async onModuleDestroy(): Promise<void> {
+    if (this.healthInterval) clearInterval(this.healthInterval);
+    if (this.flushInterval) clearInterval(this.flushInterval);
+    this.clientConnected = false;
+  }
 
-        this.client = ClientProxyFactory.create({
-            transport: Transport.REDIS,
-            options: {
-                host: tcpHost,
-                port: tcpPort,
-            },
-        } as RedisOptions);
+  getMetrics() {
+    return {
+      connected: this.clientConnected ? 1 : 0,
+      reconnectAttempt: 0,
+      reconnectTotal: 0,
+      emitQueueSize: this.emitQueue.length,
+      emitQueueMaxSize: this.emitQueueMaxSize,
+      queuedEvents: this.emitQueue.length,
+      disconnectedBufferedPatterns: this.disconnectedLatestByPattern.size,
+      disconnectedBufferOverwriteCount: this.disconnectedBufferOverwriteCount,
+      droppedQueuedEvents: this.droppedQueuedEvents,
+      flushInFlight: this.flushInFlight ? 1 : 0,
+      consumerLagMs: this.lastObservedConsumerLagMs,
+    };
+  }
 
-        try {
-            await this.client.connect();
-            this.logger.log('✅ Connected to Redis successfully!');
-        } catch (error: any) {
-            this.logger.error(
-                '❌ Failed to connect to Redis:',
-                error?.message || error,
-            );
-            throw error;
-        }
+  private normalizeEventMetadata(metadata?: EventMessageByType<SubscriptionType>['metadata']) {
+    const eventId = metadata?.eventId ?? randomUUID();
+    return {
+      eventId,
+      traceId: metadata?.traceId || eventId,
+      timestamp: metadata?.timestamp ?? Date.now(),
+      version: metadata?.version ?? 1,
+      source: metadata?.source ?? this.eventSource,
+    };
+  }
+
+  private enqueueEmitEvent(pattern: SubscriptionType, payload: Record<string, unknown>): void {
+    this.emitQueue.push({ pattern, payload });
+    this.updateRedisQueueMetrics();
+    if (this.emitQueue.length <= this.emitQueueMaxSize) return;
+
+    const dropped = this.emitQueue.length - this.emitQueueMaxSize;
+    this.emitQueue.splice(0, dropped);
+    this.droppedQueuedEvents += dropped;
+    this.updateRedisQueueMetrics();
+    this.logger.warn(
+      `[RedisEmitQueueOverflow] dropped_events=${dropped} queue_size=${this.emitQueue.length} dropped_total=${this.droppedQueuedEvents}`,
+    );
+  }
+
+  private bufferDisconnectedEmitEvent(pattern: SubscriptionType, payload: Record<string, unknown>): void {
+    if (this.disconnectedLatestByPattern.has(pattern)) {
+      this.disconnectedBufferOverwriteCount += 1;
+    }
+    this.disconnectedLatestByPattern.set(pattern, payload);
+    this.updateRedisQueueMetrics();
+  }
+
+  private drainDisconnectedBufferToQueue(): void {
+    if (this.disconnectedLatestByPattern.size === 0) return;
+    for (const [pattern, payload] of this.disconnectedLatestByPattern.entries()) {
+      this.enqueueEmitEvent(pattern, payload);
+    }
+    this.disconnectedLatestByPattern.clear();
+    this.updateRedisQueueMetrics();
+  }
+
+  private async flushQueuedEvents(): Promise<void> {
+    if (this.flushInFlight) return;
+    if (Date.now() < this.emitSuspendedUntil) return;
+    this.flushInFlight = true;
+    this.drainDisconnectedBufferToQueue();
+
+    try {
+      while (this.emitQueue.length > 0) {
+        const next = this.emitQueue.shift();
+        if (!next) continue;
+        await this.publishSingle(next.pattern, next.payload);
+      }
+    } finally {
+      this.updateRedisQueueMetrics();
+      this.flushInFlight = false;
+    }
+  }
+
+  private async publishSingle(
+    pattern: SubscriptionType,
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    const startAt = process.hrtime.bigint();
+    const traceId = this.extractTraceId(payload);
+    const consumerLagMs = this.extractConsumerLagMs(payload);
+    if (consumerLagMs !== null) {
+      this.lastObservedConsumerLagMs = consumerLagMs;
+      this.consumerLagMs.observe(consumerLagMs);
     }
 
-    emit<T = any>(pattern: SubscriptionType, data: T) {
-        if (!this.isEmitToRedisEnabled) return;
-
-        if (!this.client) {
-            // Nest may run subscribers before this service's onModuleInit; skip emit until connected
-            return;
-        }
-
-        // 🔕 DEBUG лог отключён (слишком шумный для market streams)
-        // this.logger.debug(`[RedisEmit] ${pattern}`);
-
-        this.client.emit(pattern, data);
+    if (this.debugEnabled && Date.now() - this.lastEmitLogAt >= this.emitLogThrottleMs) {
+      this.lastEmitLogAt = Date.now();
+      this.logger.debug(`[RedisEmit] pattern=${String(pattern)} trace=${traceId ?? 'n/a'}`);
     }
 
-    delay = async (ms: number) =>
-        await new Promise((resolve) => setTimeout(resolve, ms));
+    try {
+      await this.eventBus.publish({
+        channel: pattern,
+        payload,
+      });
+      this.clientConnected = true;
+    } catch (error) {
+      this.publishErrorsTotal.inc();
+      this.clientConnected = false;
+      this.emitSuspendedUntil = Date.now() + this.emitErrorCooldownMs;
+      this.logger.error(
+        `[RedisEmitError] pattern=${String(pattern)} error=${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      this.enqueueEmitEvent(pattern, payload);
+      throw error;
+    } finally {
+      const latencyMs = Number(process.hrtime.bigint() - startAt) / 1_000_000;
+      if (Number.isFinite(latencyMs) && latencyMs >= 0) {
+        this.publishLatencyMs.observe(latencyMs);
+      }
+    }
+  }
+
+  private startHealthDiagnostics(): void {
+    if (this.healthInterval) return;
+    this.healthInterval = setInterval(() => {
+      if (this.debugEnabled) {
+        this.logger.debug(
+          `[RedisHealth] connected=${this.clientConnected} queue=${this.emitQueue.length}`,
+        );
+      }
+    }, this.healthIntervalMs);
+  }
+
+  private startFlushLoop(): void {
+    if (this.flushInterval) return;
+    this.flushInterval = setInterval(() => {
+      void this.flushQueuedEvents();
+    }, 250);
+  }
+
+  private extractTraceId(data: unknown): string | undefined {
+    const maybeMetadata = (data as { metadata?: { traceId?: unknown } } | undefined)?.metadata;
+    const traceId = maybeMetadata?.traceId;
+    return typeof traceId === 'string' && traceId.length > 0 ? traceId : undefined;
+  }
+
+  private getOrCreatePublishErrorsCounter(): Counter<string> {
+    const existing = register.getSingleMetric('provider_redis_publish_errors_total');
+    if (existing) return existing as Counter<string>;
+    return new Counter({
+      name: 'provider_redis_publish_errors_total',
+      help: 'Total Redis publish errors in Provider service',
+      registers: [register],
+    });
+  }
+
+  private getOrCreatePublishLatencyHistogram(): Histogram<string> {
+    const existing = register.getSingleMetric('provider_redis_publish_latency_ms');
+    if (existing) return existing as Histogram<string>;
+    return new Histogram({
+      name: 'provider_redis_publish_latency_ms',
+      help: 'Redis publish call latency in milliseconds',
+      buckets: [0.1, 0.25, 0.5, 1, 2, 5, 10, 25, 50],
+      registers: [register],
+    });
+  }
+
+  private getOrCreateEmitQueueGauge(): Gauge<string> {
+    const existing = register.getSingleMetric('provider_redis_emit_queue_size');
+    if (existing) return existing as Gauge<string>;
+    return new Gauge({
+      name: 'provider_redis_emit_queue_size',
+      help: 'Pending Redis emits buffered in memory (queue + disconnected latest-by-pattern)',
+      registers: [register],
+    });
+  }
+
+  private getOrCreateConsumerLagHistogram(): Histogram<string> {
+    const existing = register.getSingleMetric('provider_redis_consumer_lag_ms');
+    if (existing) return existing as Histogram<string>;
+    return new Histogram({
+      name: 'provider_redis_consumer_lag_ms',
+      help: 'Observed lag between event update timestamp and Redis publish attempt (ms)',
+      buckets: [1, 5, 10, 25, 50, 100, 250, 500, 1_000, 2_500, 5_000, 10_000],
+      registers: [register],
+    });
+  }
+
+  private updateRedisQueueMetrics(): void {
+    this.emitQueueSizeGauge.set(this.emitQueue.length + this.disconnectedLatestByPattern.size);
+  }
+
+  private extractConsumerLagMs(payload: Record<string, unknown>): number | null {
+    const optionsMoment = (payload as { options?: { updateMoment?: unknown } }).options?.updateMoment;
+    const metadataMoment = (payload as { metadata?: { timestamp?: unknown } }).metadata?.timestamp;
+    const sourceTimestamp = Number(optionsMoment ?? metadataMoment);
+    if (!Number.isFinite(sourceTimestamp) || sourceTimestamp <= 0) return null;
+    const lag = Date.now() - sourceTimestamp;
+    if (!Number.isFinite(lag)) return null;
+    return Math.max(0, lag);
+  }
 }

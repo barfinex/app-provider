@@ -35,6 +35,11 @@ export class EventSinkRepository implements OnModuleInit, OnModuleDestroy {
 
   private readonly FLUSH_INTERVAL_MS = Number(process.env.EVENTSINK_FLUSH_INTERVAL ?? 50);
   private readonly MAX_BATCH_SIZE = Number(process.env.EVENTSINK_BATCH_SIZE ?? 500);
+  private readonly QUEUE_MAX_SIZE = Math.max(
+    this.MAX_BATCH_SIZE,
+    Number(process.env.EVENTSINK_QUEUE_MAX_SIZE ?? this.MAX_BATCH_SIZE * 10),
+  );
+  private droppedEventsTotal = 0;
 
   /** 🔒 Защита от 1970 */
   private static readonly MIN_REASONABLE_TS = 946684800000; // 2000-01-01 UTC
@@ -66,6 +71,14 @@ export class EventSinkRepository implements OnModuleInit, OnModuleDestroy {
     if (process.env.EVENTSINK_ENABLED === 'false') return;
 
     this.queue.push({ eventType, event });
+    if (this.queue.length > this.QUEUE_MAX_SIZE) {
+      const dropped = this.queue.length - this.QUEUE_MAX_SIZE;
+      this.queue.splice(0, dropped);
+      this.droppedEventsTotal += dropped;
+      console.warn(
+        `[EventSinkQueueOverflow] dropped=${dropped} dropped_total=${this.droppedEventsTotal} queue_size=${this.queue.length} queue_max=${this.QUEUE_MAX_SIZE}`,
+      );
+    }
     this.recordRuntimeEventTs(event.timestamp);
 
     // WS broadcast

@@ -1,6 +1,6 @@
 import { Module, forwardRef } from '@nestjs/common';
-import { ClientsModule, Transport } from '@nestjs/microservices';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { EventBusClientProxyCompat, EventBusModule } from '@barfinex/event-bus';
 
 import { ConnectorController } from './connector.controller';
 import { ConnectorService } from './connector.service';
@@ -32,18 +32,9 @@ import { BinanceModule } from './datasource/binance/binance.module';
     KeyModule,
     // EventEmitterModule.forRoot(),
 
-    ClientsModule.register([
-      {
-        name: 'PROVIDER_SERVICE',
-        transport: Transport.REDIS,
-        options: {
-          host: process.env.REDIS_HOST,
-          port: +(process.env.REDIS_PORT ?? 6379),
-          retryAttempts: 10,
-          retryDelay: 5000,
-        },
-      },
-    ]),
+    EventBusModule.forRoot({
+      loggerContext: 'ProviderEventBus',
+    }),
 
     forwardRef(() => AccountModule),
     forwardRef(() => DetectorModule),
@@ -61,6 +52,10 @@ import { BinanceModule } from './datasource/binance/binance.module';
   controllers: [ConnectorController],
 
   providers: [
+    {
+      provide: 'PROVIDER_SERVICE',
+      useExisting: EventBusClientProxyCompat,
+    },
     // Facade
     ConnectorService,
 

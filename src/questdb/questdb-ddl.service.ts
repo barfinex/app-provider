@@ -23,16 +23,135 @@ export interface CandlesSuspendContext {
 /** Задержка повторной проверки WAL после старта (если QuestDB снова переведёт таблицу в suspended). */
 const POST_INIT_WAL_CHECK_DELAY_MS = 10_000;
 
+/** Wait for QuestDB to accept connections before DDL. 0 = disabled. env: QUESTDB_READY_MAX_ATTEMPTS, QUESTDB_READY_INTERVAL_MS. */
+const READY_MAX_ATTEMPTS = Math.max(0, Number(process.env.QUESTDB_READY_MAX_ATTEMPTS ?? 30));
+const READY_INTERVAL_MS = Math.max(500, Number(process.env.QUESTDB_READY_INTERVAL_MS ?? 1000));
+
+/** Delay before running DDL after ready (or after startup if ready disabled). env: QUESTDB_DDL_INITIAL_DELAY_MS. */
+const DDL_INITIAL_DELAY_MS = Math.max(0, Number(process.env.QUESTDB_DDL_INITIAL_DELAY_MS ?? 5000));
+
+/** Retry whole DDL phase on transient errors (e.g. ECONNRESET). env: QUESTDB_DDL_PHASE_MAX_ATTEMPTS. */
+const DDL_PHASE_MAX_ATTEMPTS = Math.max(
+  1,
+  Number(process.env.QUESTDB_DDL_PHASE_MAX_ATTEMPTS || 10),
+);
+/** Base delay (ms) between DDL phase retries. env: QUESTDB_DDL_PHASE_BASE_MS. */
+const DDL_PHASE_BASE_MS = Math.max(
+  1000,
+  Number(process.env.QUESTDB_DDL_PHASE_BASE_MS || 3000),
+);
+/** If true, on final DDL failure do not throw — schedule background retries until success. env: QUESTDB_DDL_DEFERRED_ON_FAIL. */
+const DDL_DEFERRED_ON_FAIL =
+  String(process.env.QUESTDB_DDL_DEFERRED_ON_FAIL || 'true').toLowerCase() === 'true';
+/** Interval (ms) for deferred DDL retries. env: QUESTDB_DDL_DEFERRED_INTERVAL_MS. */
+const DDL_DEFERRED_INTERVAL_MS = Math.max(
+  5000,
+  Number(process.env.QUESTDB_DDL_DEFERRED_INTERVAL_MS || 30_000),
+);
+
+function isRetriableConnectionError(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : String(e);
+  const s = msg.toLowerCase();
+  return (
+    s.includes('econnreset') ||
+    s.includes('econnrefused') ||
+    s.includes('connection reset') ||
+    s.includes('socket hang up') ||
+    s.includes('etimedout') ||
+    s.includes('connection refused')
+  );
+}
+
 @Injectable()
 export class QuestDBDDLService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(QuestDBDDLService.name);
+  private readonly isProduction = String(process.env.NODE_ENV || '').toLowerCase() === 'production';
+  private readonly stopOnWalSuspended =
+    String(
+      process.env.QUESTDB_STOP_ON_WAL_SUSPENDED
+      || (this.isProduction ? 'true' : 'false'),
+    ).toLowerCase() === 'true';
+  private walSuspendedDetectedAt: number | null = null;
   private postInitWalCheckTimer: ReturnType<typeof setTimeout> | null = null;
+  private deferredDdlTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(private readonly reader: QuestDBQueryService) {}
 
   async onModuleInit() {
-    console.log('🛠 Generating QuestDB tables...');
+    this.logger.log('Generating QuestDB tables...');
 
+    if (READY_MAX_ATTEMPTS > 0) {
+      await this.waitForQuestDBReady();
+    }
+
+    if (DDL_INITIAL_DELAY_MS > 0) {
+      this.logger.log(`Waiting ${DDL_INITIAL_DELAY_MS}ms before DDL (QUESTDB_DDL_INITIAL_DELAY_MS).`);
+      await new Promise((r) => setTimeout(r, DDL_INITIAL_DELAY_MS));
+    }
+
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= DDL_PHASE_MAX_ATTEMPTS; attempt++) {
+      try {
+        await this.runDdlPhase();
+        this.schedulePostInitWalCheck();
+        return;
+      } catch (e) {
+        lastError = e;
+        const msg = e instanceof Error ? e.message : String(e);
+        if (!isRetriableConnectionError(e)) {
+          this.logger.error(`QuestDB DDL error (non-retriable): ${msg}`);
+          throw e;
+        }
+        if (attempt < DDL_PHASE_MAX_ATTEMPTS) {
+          const delayMs = Math.min(
+            DDL_PHASE_BASE_MS * Math.pow(2, attempt - 1),
+            DDL_PHASE_BASE_MS * 32,
+          );
+          this.logger.warn(
+            `QuestDB DDL phase failed (attempt ${attempt}/${DDL_PHASE_MAX_ATTEMPTS}): ${msg}. Retrying in ${delayMs}ms`,
+          );
+          await new Promise((r) => setTimeout(r, delayMs));
+        }
+      }
+    }
+
+    if (DDL_DEFERRED_ON_FAIL) {
+      this.logger.warn(
+        `QuestDB DDL failed after ${DDL_PHASE_MAX_ATTEMPTS} attempts (${lastError instanceof Error ? lastError.message : String(lastError)}). Deferred mode: will retry in background every ${DDL_DEFERRED_INTERVAL_MS / 1000}s until success.`,
+      );
+      this.scheduleDeferredDdl();
+      return;
+    }
+
+    this.logger.error(
+      `QuestDB DDL error after ${DDL_PHASE_MAX_ATTEMPTS} attempts: ${lastError instanceof Error ? (lastError as Error).message : String(lastError)}`,
+    );
+    throw lastError;
+  }
+
+  /** Poll QuestDB with SELECT 1 until it responds or READY_MAX_ATTEMPTS exceeded. Prevents ECONNRESET during DDL. */
+  private async waitForQuestDBReady(): Promise<void> {
+    for (let attempt = 1; attempt <= READY_MAX_ATTEMPTS; attempt++) {
+      try {
+        await this.reader.query('SELECT 1');
+        this.logger.log(`QuestDB ready (attempt ${attempt}/${READY_MAX_ATTEMPTS}).`);
+        return;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (attempt < READY_MAX_ATTEMPTS) {
+          this.logger.warn(
+            `QuestDB not ready (${attempt}/${READY_MAX_ATTEMPTS}): ${msg}. Retrying in ${READY_INTERVAL_MS}ms.`,
+          );
+          await new Promise((r) => setTimeout(r, READY_INTERVAL_MS));
+        } else {
+          this.logger.warn(`QuestDB not ready after ${READY_MAX_ATTEMPTS} attempts: ${msg}. Proceeding with DDL (will retry on failure).`);
+        }
+      }
+    }
+  }
+
+  /** Single full DDL phase: all tables + WAL resume. */
+  private async runDdlPhase(): Promise<void> {
     await this.createCandlesTable();
     await this.tryResumeCandlesWal();
     await this.createTradesTable();
@@ -44,21 +163,41 @@ export class QuestDBDDLService implements OnModuleInit, OnModuleDestroy {
     await this.createInspectorsTable();
     await this.createAppRegistryTable();
     await this.createEventSinkTable();
+    this.logger.log('QuestDB schema ready');
+  }
 
-    console.log('✅ QuestDB schema ready');
-
+  private schedulePostInitWalCheck(): void {
     this.postInitWalCheckTimer = setTimeout(() => {
       this.postInitWalCheckTimer = null;
       this.tryResumeCandlesWal()
         .then(() => {})
         .catch(() => {});
     }, POST_INIT_WAL_CHECK_DELAY_MS);
-    // Лог только если задержка включена (для отладки)
     if (POST_INIT_WAL_CHECK_DELAY_MS > 0) {
-      console.log(
-        `QuestDB: scheduled WAL re-check in ${POST_INIT_WAL_CHECK_DELAY_MS / 1000}s (candles suspended recovery).`,
+      this.logger.log(
+        `QuestDB: WAL re-check scheduled in ${POST_INIT_WAL_CHECK_DELAY_MS / 1000}s (candles recovery).`,
       );
     }
+  }
+
+  private scheduleDeferredDdl(): void {
+    if (this.deferredDdlTimer != null) return;
+    this.deferredDdlTimer = setInterval(() => {
+      this.runDdlPhase()
+        .then(() => {
+          if (this.deferredDdlTimer != null) {
+            clearInterval(this.deferredDdlTimer);
+            this.deferredDdlTimer = null;
+          }
+          this.logger.log('QuestDB deferred DDL completed successfully.');
+          this.schedulePostInitWalCheck();
+        })
+        .catch((e) => {
+          this.logger.warn(
+            `QuestDB deferred DDL retry failed: ${e instanceof Error ? e.message : String(e)}`,
+          );
+        });
+    }, DDL_DEFERRED_INTERVAL_MS);
   }
 
   onModuleDestroy() {
@@ -66,13 +205,27 @@ export class QuestDBDDLService implements OnModuleInit, OnModuleDestroy {
       clearTimeout(this.postInitWalCheckTimer);
       this.postInitWalCheckTimer = null;
     }
+    if (this.deferredDdlTimer != null) {
+      clearInterval(this.deferredDdlTimer);
+      this.deferredDdlTimer = null;
+    }
   }
 
-  private async exec(sql: string) {
+  getWalSuspensionStatus(): { suspended: boolean; detectedAt: number | null } {
+    return {
+      suspended: this.walSuspendedDetectedAt != null,
+      detectedAt: this.walSuspendedDetectedAt,
+    };
+  }
+
+  /** Runs DDL; on failure logs and rethrows so init does not claim "schema ready". */
+  private async exec(sql: string): Promise<void> {
     try {
       await this.reader.query(sql);
     } catch (e) {
-      console.error('❌ QuestDB DDL error:', e);
+      const msg = e instanceof Error ? e.message : String(e);
+      this.logger.error(`QuestDB DDL error ${msg}`);
+      throw e;
     }
   }
 
@@ -184,9 +337,11 @@ export class QuestDBDDLService implements OnModuleInit, OnModuleDestroy {
         );
       if (stillSuspended) {
         console.error(
-          'QuestDB: candles still suspended after RESUME WAL. Stopping application.',
+          'QuestDB: candles still suspended after RESUME WAL.',
         );
         this.exitOnSuspended(lastWriteContext);
+      } else {
+        this.markWalHealthy();
       }
       console.log('✅ QuestDB: candles table WAL resumed after bulk write.');
     } catch (err) {
@@ -201,7 +356,7 @@ export class QuestDBDDLService implements OnModuleInit, OnModuleDestroy {
    * Если таблица candles в состоянии suspended (WAL приостановлен из‑за ошибки),
    * пытаемся возобновить: ALTER TABLE candles RESUME WAL.
    * Вызывается при старте и по крону каждую минуту.
-   * Если после попытки RESUME таблица всё ещё suspended — останавливаем приложение (process.exit(1)),
+   * Если после попытки RESUME таблица всё ещё suspended — инициируем graceful shutdown,
    * чтобы не пропустить момент и сохранить в логах последние [QuestDB SQL #N] и [QuestDB ILP] операции.
    */
   async tryResumeCandlesWal(): Promise<void> {
@@ -238,9 +393,11 @@ export class QuestDBDDLService implements OnModuleInit, OnModuleDestroy {
           );
         if (stillSuspended) {
           console.error(
-            'QuestDB: table candles still suspended after RESUME WAL. Stopping application.',
+            'QuestDB: table candles still suspended after RESUME WAL.',
           );
           this.exitOnSuspended();
+        } else {
+          this.markWalHealthy();
         }
         console.log('✅ QuestDB: candles table WAL resumed.');
       }
@@ -252,17 +409,44 @@ export class QuestDBDDLService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private exitOnSuspended(lastWriteContext?: CandlesSuspendContext): never {
-    console.error(
-      '🛑 Candles table suspended — application stopped. Check logs above for last [QuestDB SQL #N] and [QuestDB ILP].',
-    );
+  private exitOnSuspended(lastWriteContext?: CandlesSuspendContext): void {
+    this.markWalSuspended();
+    console.error('🛑 Candles table suspended (WAL).');
     if (lastWriteContext) {
       console.error(
         'Suspend context:\n' +
           QuestDBDDLService.formatLastWriteContext(lastWriteContext),
       );
     }
-    process.exit(1);
+
+    if (this.stopOnWalSuspended) {
+      console.error(
+        'QuestDB strict mode enabled (QUESTDB_STOP_ON_WAL_SUSPENDED=true): requesting graceful shutdown via SIGTERM.',
+      );
+      try {
+        process.kill(process.pid, 'SIGTERM');
+      } catch (error) {
+        this.logger.error(
+          `Failed to request SIGTERM shutdown after WAL suspension: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+
+    this.logger.error(
+      'QuestDB WAL suspended state detected, but process termination is disabled. Provider stays online and will continue periodic recovery attempts.',
+    );
+  }
+
+  private markWalSuspended(): void {
+    if (this.walSuspendedDetectedAt == null) {
+      this.walSuspendedDetectedAt = Date.now();
+    }
+  }
+
+  private markWalHealthy(): void {
+    this.walSuspendedDetectedAt = null;
   }
 
   /** Периодическая проверка и возобновление WAL для candles (каждую минуту). */

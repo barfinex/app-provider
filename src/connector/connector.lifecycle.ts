@@ -10,6 +10,7 @@ import {
 import {
     ConnectorType,
     MarketType,
+    SubscriptionType,
     TimeFrame,
     Symbol,
     ALL_CANDLE_INTERVALS,
@@ -50,6 +51,8 @@ export class ConnectorLifecycle
     // =========================================================================
 
     private initialized = false;
+    private destroyed = false;
+    private destroyInFlight: Promise<void> | null = null;
 
     async onModuleInit(): Promise<void> {
         if (this.initialized) {
@@ -187,7 +190,23 @@ export class ConnectorLifecycle
                     });
 
                     // -----------------------------------------------------------------
-                    // 6.3) DEFAULT SYMBOL (BTCUSDT)
+                    // 6.3) SYMBOLS ИЗ КОНФИГУРАЦИИ ПОДПИСОК MARKET DATA
+                    // -----------------------------------------------------------------
+                    const configuredStreamSymbols = this.collectConfiguredMarketDataSymbols(
+                        connector.connectorType,
+                        market.marketType,
+                    );
+                    configuredStreamSymbols.forEach((symbolName) => {
+                        if (!symbols.find((q) => q.name === symbolName)) {
+                            symbols.push({ name: symbolName });
+                            this.logger.debug(
+                                `Added configured stream symbol: ${symbolName} (connector ${connector.connectorType})`,
+                            );
+                        }
+                    });
+
+                    // -----------------------------------------------------------------
+                    // 6.4) DEFAULT SYMBOL (BTCUSDT)
                     // -----------------------------------------------------------------
                     const defaultSymbol = 'BTCUSDT';
                     if (!symbols.find((q) => q.name === defaultSymbol)) {
@@ -198,9 +217,13 @@ export class ConnectorLifecycle
                     }
 
                     // -----------------------------------------------------------------
-                    // 6.4) ОБНОВЛЕНИЕ ПОДПИСОК
+                    // 6.5) ОБНОВЛЕНИЕ ПОДПИСОК
                     // -----------------------------------------------------------------
                     if (symbols.length > 0) {
+                        const balanceStats = this.accountService.getBalanceStats(
+                            connector.connectorType,
+                            market.marketType,
+                        );
                         this.logger.log(
                             `Updating subscription: connector=${connector.connectorType}, market=${market.marketType}, symbols=${symbols
                                 .map((s) => s.name)
@@ -212,6 +235,7 @@ export class ConnectorLifecycle
                             market.marketType,
                             symbols,
                             intervals,
+                            balanceStats,
                         );
                     }
                 }
@@ -232,63 +256,55 @@ export class ConnectorLifecycle
     // =========================================================================
 
     async onModuleDestroy(): Promise<void> {
-        console.log(`[${this.constructor.name}] ModuleDestroy start`);
+        if (this.destroyInFlight) {
+            await this.destroyInFlight;
+            return;
+        }
 
-        const allConnectors = Object.values(ConnectorRegistry.connectors);
-        const intervals: TimeFrame[] = [TimeFrame.min1];
+        if (this.destroyed) {
+            this.logger.warn('[ConnectorLifecycle] ModuleDestroy already executed; skip duplicate call');
+            return;
+        }
+        this.destroyInFlight = (async () => {
+            this.destroyed = true;
+            this.logger.log('[ConnectorLifecycle] ModuleDestroy start');
 
-        console.log(`[${this.constructor.name}] intervals:`, intervals);
+            const allConnectors = Object.values(ConnectorRegistry.connectors);
+            const intervals: TimeFrame[] = [TimeFrame.min1];
 
-        ConnectorRegistry.setDetectors(
-            await this.detectorService.getAllDetectorsByProviderKey(
-                ConnectorRegistry.key,
-            ),
-        );
+            this.logger.debug(`[ConnectorLifecycle] destroy intervals=${intervals.join(',')}`);
 
-        console.log(
-            `[${this.constructor.name}] detectors:`,
-            ConnectorRegistry.detectors.map((d) => ({
-                key: d.key,
-                symbols: d.symbols?.length,
-            })),
-        );
-
-        // ✅ GUARDED unsubscribe: один раз на connectorType
-        const unsubscribed = new Set<ConnectorType>();
-
-        allConnectors.forEach((connector) => {
-            console.log(
-                `[${this.constructor.name}] connector: ${connector.connectorType}, markets: ${connector.markets?.length}`,
+            ConnectorRegistry.setDetectors(
+                await this.detectorService.getAllDetectorsByProviderKey(
+                    ConnectorRegistry.key,
+                ),
             );
 
-            connector.markets.forEach((market) => {
-                console.log(
-                    `[${this.constructor.name}] marketType: ${market.marketType}, symbols=${market.symbols?.length}`,
+            this.logger.debug(
+                `[ConnectorLifecycle] destroy detectors=${JSON.stringify(
+                    ConnectorRegistry.detectors.map((d) => ({
+                        key: d.key,
+                        symbols: d.symbols?.length,
+                    })),
+                )}`,
+            );
+
+            // ✅ GUARDED unsubscribe: один раз на connectorType
+            const unsubscribed = new Set<ConnectorType>();
+
+            allConnectors.forEach((connector) => {
+                this.logger.debug(
+                    `[ConnectorLifecycle] destroy connector=${connector.connectorType} markets=${connector.markets?.length}`,
                 );
 
-                if (market.symbols && market.symbols.length > 0) {
-                    console.log(
-                        `[${this.constructor.name}] unsubscribeCollection(${connector.connectorType}) (market.symbols > 0)`,
+                connector.markets.forEach((market) => {
+                    this.logger.debug(
+                        `[ConnectorLifecycle] destroy marketType=${market.marketType} symbols=${market.symbols?.length}`,
                     );
 
-                    if (!unsubscribed.has(connector.connectorType)) {
-                        this.subscriptionService.unsubscribeCollection(
-                            connector.connectorType,
-                        );
-                        unsubscribed.add(connector.connectorType);
-                    }
-                }
-
-                ConnectorRegistry.detectors.forEach((detector) => {
-                    const { symbols } = detector;
-
-                    console.log(
-                        `[${this.constructor.name}] detector ${detector.key} symbols: ${symbols?.length}`,
-                    );
-
-                    if (symbols.length > 0) {
-                        console.log(
-                            `[${this.constructor.name}] unsubscribeCollection(${connector.connectorType}) (detector.symbols > 0)`,
+                    if (market.symbols && market.symbols.length > 0) {
+                        this.logger.debug(
+                            `[ConnectorLifecycle] destroy unsubscribe connector=${connector.connectorType} source=market-symbols`,
                         );
 
                         if (!unsubscribed.has(connector.connectorType)) {
@@ -298,15 +314,80 @@ export class ConnectorLifecycle
                             unsubscribed.add(connector.connectorType);
                         }
                     }
+
+                    ConnectorRegistry.detectors.forEach((detector) => {
+                        const { symbols } = detector;
+
+                        this.logger.debug(
+                            `[ConnectorLifecycle] destroy detector=${detector.key} symbols=${symbols?.length}`,
+                        );
+
+                        if (symbols.length > 0) {
+                            this.logger.debug(
+                                `[ConnectorLifecycle] destroy unsubscribe connector=${connector.connectorType} source=detector-symbols`,
+                            );
+
+                            if (!unsubscribed.has(connector.connectorType)) {
+                                this.subscriptionService.unsubscribeCollection(
+                                    connector.connectorType,
+                                );
+                                unsubscribed.add(connector.connectorType);
+                            }
+                        }
+                    });
                 });
             });
-        });
 
-        console.log(
-            `[${this.constructor.name}] unsubscribed connectors:`,
-            Array.from(unsubscribed),
+            this.logger.log(
+                `[ConnectorLifecycle] ModuleDestroy complete unsubscribed=${Array.from(unsubscribed).join(',') || 'none'}`,
+            );
+        })();
+
+        await this.destroyInFlight;
+    }
+
+    private collectConfiguredMarketDataSymbols(
+        connectorType: ConnectorType,
+        marketType: MarketType,
+    ): string[] {
+        const runtimeConfig = this.configService.getConfig() as {
+            provider?: {
+                connectors?: Array<{
+                    connectorType?: ConnectorType | string;
+                    subscriptions?: Array<{
+                        type?: SubscriptionType | string;
+                        active?: boolean;
+                        symbols?: string[];
+                    }>;
+                }>;
+            };
+        };
+        const configuredConnector = (runtimeConfig.provider?.connectors ?? []).find(
+            connector => String(connector?.connectorType || '').toLowerCase() === String(connectorType).toLowerCase(),
         );
-
-        console.log(`[${this.constructor.name}] ModuleDestroy complete`);
+        const streams = new Set<SubscriptionType | string>([
+            SubscriptionType.PROVIDER_MARKETDATA_TRADE,
+            SubscriptionType.PROVIDER_MARKETDATA_ORDERBOOK,
+            SubscriptionType.PROVIDER_MARKETDATA_CANDLE,
+            SubscriptionType.PROVIDER_SYMBOL_PRICES,
+        ]);
+        const collected = new Set<string>();
+        for (const subscription of configuredConnector?.subscriptions ?? []) {
+            if (!subscription?.active) continue;
+            if (!streams.has(subscription.type || '')) continue;
+            for (const rawSymbol of subscription.symbols ?? []) {
+                const normalized = String(rawSymbol || '')
+                    .trim()
+                    .toUpperCase();
+                if (!normalized) continue;
+                collected.add(normalized);
+            }
+        }
+        if (collected.size > 0) {
+            this.logger.debug(
+                `[ConnectorLifecycle] configured marketdata symbols market=${marketType} count=${collected.size}`,
+            );
+        }
+        return Array.from(collected);
     }
 }

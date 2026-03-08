@@ -8,6 +8,8 @@ import { ConfigService } from '@barfinex/config';
 
 @Injectable()
 export class ProviderApiTokenGuard implements CanActivate {
+  private static readonly PUBLIC_HEALTH_PATHS = new Set(['/health/live', '/health/ready']);
+
   constructor(private readonly configService: ConfigService) {}
 
   canActivate(context: ExecutionContext): boolean {
@@ -17,11 +19,18 @@ export class ProviderApiTokenGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest<{
       method?: string;
+      url?: string;
+      path?: string;
       headers?: Record<string, string | string[] | undefined>;
     }>();
 
     // Let CORS preflight pass; actual API call is still protected.
     if ((request.method || '').toUpperCase() === 'OPTIONS') {
+      return true;
+    }
+
+    const requestPath = this.normalizePath(request.path || request.url || '');
+    if (ProviderApiTokenGuard.PUBLIC_HEALTH_PATHS.has(requestPath)) {
       return true;
     }
 
@@ -50,5 +59,13 @@ export class ProviderApiTokenGuard implements CanActivate {
     }
 
     return true;
+  }
+
+  private normalizePath(path: string): string {
+    const withoutQuery = path.split('?')[0] || '';
+    const normalized = withoutQuery.endsWith('/') && withoutQuery.length > 1
+      ? withoutQuery.slice(0, -1)
+      : withoutQuery;
+    return normalized || '/';
   }
 }

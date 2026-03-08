@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import {
   TimeFrame,
   History,
@@ -17,6 +17,7 @@ import { floor, ms } from './time/time.utils';
 
 @Injectable()
 export class CandleService {
+  private readonly logger = new Logger(CandleService.name);
   private static readonly REALTIME_CHAIN: TimeFrame[] = [
     TimeFrame.min1,
     TimeFrame.min5,
@@ -82,13 +83,17 @@ export class CandleService {
     interval: TimeFrame,
     options?: { days?: number },
   ): Promise<Candle[]> {
-    return this.history.getSingle({
+    const rows = await this.history.getSingle({
       connectorType,
       marketType,
       symbol,
       interval,
       days: options?.days,
     });
+    this.logger.debug(
+      `[CANDLES] tf=${interval} rows=${rows.length} symbol=${symbol.name}`,
+    );
+    return rows;
   }
 
   async getByDetectorSysname(

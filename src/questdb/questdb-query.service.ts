@@ -10,15 +10,19 @@ import { Client } from 'pg';
 const QUESTDB_SQL_LOG_MAX_LEN = 400;
 const QUESTDB_QUERY_MAX_ATTEMPTS = Math.max(
     1,
-    Number(process.env.QUESTDB_QUERY_MAX_ATTEMPTS || 6),
+    Number(process.env.QUESTDB_QUERY_MAX_ATTEMPTS ?? 3),
 );
 const QUESTDB_QUERY_RETRY_BASE_MS = Math.max(
     50,
-    Number(process.env.QUESTDB_QUERY_RETRY_BASE_MS || 120),
+    Number(process.env.QUESTDB_QUERY_RETRY_BASE_MS ?? 200),
 );
 const QUESTDB_QUERY_RETRY_MAX_DELAY_MS = Math.max(
     QUESTDB_QUERY_RETRY_BASE_MS,
-    Number(process.env.QUESTDB_QUERY_RETRY_MAX_DELAY_MS || 1200),
+    Number(process.env.QUESTDB_QUERY_RETRY_MAX_DELAY_MS ?? 3000),
+);
+const QUESTDB_QUERY_QUEUE_MAX_SIZE = Math.max(
+    100,
+    Number(process.env.QUESTDB_QUERY_QUEUE_MAX_SIZE ?? 5000),
 );
 
 const WAL_DRAIN_INITIAL_SLEEP_MS = 500;
@@ -41,6 +45,7 @@ function safeTableName(table: string): boolean {
 @Injectable()
 export class QuestDBQueryService implements OnModuleInit {
     private connected = false;
+    private readonly debugEnabled = process.env.QUESTDB_DEBUG === 'true';
 
     /** Single-flight per table: only one concurrent RESUME WAL per table. */
     private walResumeLocks = new Map<string, Promise<void>>();
@@ -61,18 +66,28 @@ export class QuestDBQueryService implements OnModuleInit {
     /** Лог SQL выключен по умолчанию; включается только при QUESTDB_LOG_SQL=true. */
     private readonly logSql = process.env.QUESTDB_LOG_SQL === 'true';
 
-    private readonly host = process.env.QUESTDB_HOST || 'localhost';
+    private readonly configuredHost = (
+        process.env.QUESTDB_HOST || '127.0.0.1'
+    ).trim().replace(/^localhost$/i, '127.0.0.1');
+    private currentHost = this.configuredHost;
+    private readonly hasIpv4Fallback = false;
     private readonly port = Number(process.env.QUESTDB_PG_PORT || 8812);
     private readonly user = process.env.QUESTDB_USER || 'admin';
     private readonly password = process.env.QUESTDB_PASSWORD || 'quest';
     private readonly database = process.env.QUESTDB_DATABASE || 'qdb';
+
+    private debug(message: string): void {
+        if (this.debugEnabled) {
+            this.logger.debug(message);
+        }
+    }
 
     // ============================================================
     // INIT
     // ============================================================
     async onModuleInit() {
         this.logger.log(
-            `Initializing QuestDB PG connection handler: ${this.host}:${this.port}`,
+            `Initializing QuestDB PG connection handler: ${this.currentHost}:${this.port}`,
         );
 
         // Не подключаемся заранее — это провоцирует обрывы!
@@ -87,7 +102,7 @@ export class QuestDBQueryService implements OnModuleInit {
     // ============================================================
     private makeClient(): Client {
         return new Client({
-            host: this.host,
+            host: this.currentHost,
             port: this.port,
             user: this.user,
             password: this.password,
@@ -96,13 +111,14 @@ export class QuestDBQueryService implements OnModuleInit {
         });
     }
 
-    // ============================================================
-    // RECONNECT (фактически просто разрешаем очереди работать дальше)
-    // ============================================================
-    private safeReconnect() {
-        this.logger.warn('Reconnecting QuestDB PG (virtual reconnection)');
-        this.connected = true;
-        setTimeout(() => this.flushQueue(), 50);
+    private maybeSwitchToIpv4Fallback(err: unknown): void {
+        if (!this.hasIpv4Fallback) return;
+        if (this.currentHost === '127.0.0.1') return;
+        if (!this.isRetriableConnectionError(err)) return;
+        this.currentHost = '127.0.0.1';
+        this.logger.warn(
+            'QuestDB PG localhost connection is unstable; switching to 127.0.0.1 fallback',
+        );
     }
 
     // ============================================================
@@ -110,6 +126,17 @@ export class QuestDBQueryService implements OnModuleInit {
     // ============================================================
     private enqueue(sql: string): Promise<any> {
         return new Promise((resolve, reject) => {
+            if (this.queue.length >= QUESTDB_QUERY_QUEUE_MAX_SIZE) {
+                this.logger.error(
+                    `[QuestDBQuery] queue overflow size=${this.queue.length} max=${QUESTDB_QUERY_QUEUE_MAX_SIZE}`,
+                );
+                reject(
+                    new Error(
+                        `QuestDB query queue overflow (max=${QUESTDB_QUERY_QUEUE_MAX_SIZE})`,
+                    ),
+                );
+                return;
+            }
             this.queue.push({ sql, resolve, reject });
             this.flushQueue();
         });
@@ -158,14 +185,17 @@ export class QuestDBQueryService implements OnModuleInit {
             const retriable = this.isRetriableConnectionError(err);
 
             if (retriable && retry < QUESTDB_QUERY_MAX_ATTEMPTS) {
+                this.maybeSwitchToIpv4Fallback(err);
                 const delay = Math.min(
                     QUESTDB_QUERY_RETRY_MAX_DELAY_MS,
                     QUESTDB_QUERY_RETRY_BASE_MS * Math.pow(2, retry - 1),
                 );
-                this.logger.warn(
-                    `[QuestDB SQL #${opId}] transient connection error (attempt ${retry}/${QUESTDB_QUERY_MAX_ATTEMPTS}): ${message}. Retrying in ${delay}ms`,
-                );
-                this.safeReconnect();
+                const logLine = `[QuestDB SQL #${opId}] transient connection error (attempt ${retry}/${QUESTDB_QUERY_MAX_ATTEMPTS}): ${message}. Retrying in ${delay}ms`;
+                if (retry === 1) {
+                    this.logger.warn(logLine);
+                } else {
+                    this.debug(logLine);
+                }
                 await new Promise(r => setTimeout(r, delay));
                 return this.executeSql(sql, retry + 1);
             }
@@ -256,12 +286,12 @@ export class QuestDBQueryService implements OnModuleInit {
                     const now = Date.now();
                     const lastResumeAt = this.walLastResumeAt.get(table) ?? 0;
                     if (now - lastResumeAt < WAL_RESUME_THROTTLE_MS) {
-                        this.logger.debug(
+                        this.debug(
                             `[WAL] resume cooldown for ${table} (${WAL_RESUME_THROTTLE_MS}ms)`,
                         );
                         return;
                     }
-                    this.logger.debug(`[WAL] resume triggered for ${table}`);
+                    this.debug(`[WAL] resume triggered for ${table}`);
                     await this.query(`ALTER TABLE ${table} RESUME WAL`);
                     this.walLastResumeAt.set(table, now);
                 }
@@ -355,12 +385,12 @@ export class QuestDBQueryService implements OnModuleInit {
             while (true) {
                 const state = await this.queryWalState(table);
                 if (!state) {
-                    this.logger.debug('[WAL] drain completed');
+                    this.debug('[WAL] drain completed');
                     return;
                 }
 
                 const lag = state.sequencerTxn - state.writerTxn;
-                this.logger.debug(
+                this.debug(
                     `[WAL] checking table=${table} lag=${lag} suspended=${state.suspended}`,
                 );
 
@@ -377,7 +407,7 @@ export class QuestDBQueryService implements OnModuleInit {
                     healthyStreak += 1;
                     suspendedStreak = 0;
                     if (healthyStreak >= WAL_HEALTHY_STREAK_REQUIRED) {
-                        this.logger.debug('[WAL] drain completed');
+                        this.debug('[WAL] drain completed');
                         return;
                     }
                 } else {

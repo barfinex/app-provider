@@ -232,12 +232,17 @@ export class ConnectorService
         marketType: MarketType,
         symbols: Symbol[],
         intervals?: TimeFrame[],
+        pipelineMeta?: {
+            rawAssetsCount?: number;
+            activeAssetsCount?: number;
+        },
     ) {
         return this.subscriptionService.updateSubscribeCollection(
             connectorType,
             marketType,
             symbols,
             intervals,
+            pipelineMeta,
         );
     }
 
