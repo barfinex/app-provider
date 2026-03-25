@@ -25,7 +25,7 @@ export class SymbolRepository {
     public readonly reader: QuestDBQueryService,
     private readonly events: SymbolEventAdapter,
     private readonly ilpWriter: QuestDbIlpWriterService, // 🔹 новый ILP-writer
-  ) { }
+  ) {}
 
   /** Экранирование строк для SQL (осталось только для SELECT/TRUNCATE) */
   private esc(v: string): string {
@@ -55,7 +55,6 @@ export class SymbolRepository {
     `);
   }
 
-
   private static deleteLock: Promise<void> = Promise.resolve();
 
   async deleteAll(connectorType: string, marketType: string): Promise<void> {
@@ -63,36 +62,43 @@ export class SymbolRepository {
     const mt = this.esc(marketType);
 
     SymbolRepository.deleteLock = SymbolRepository.deleteLock.then(async () => {
-
       // 1. Удаляем остатки symbols_clean, если они остались от предыдущего падения
       await this.reader.query(`DROP TABLE IF EXISTS symbols_clean;`);
 
       // 2. Если основной таблицы нет — выходим
-      await this.reader.query(`
+      await this.reader
+        .query(
+          `
       SELECT * FROM symbols LIMIT 1;
-    `).catch(() => null); // swallow
+    `,
+        )
+        .catch(() => null); // swallow
 
       // 3. Пересоздаём таблицу БЕЗ binance/futures
-      await this.reader.query(`
+      await this.reader
+        .query(
+          `
       CREATE TABLE symbols_clean AS (
         SELECT *
         FROM symbols
         WHERE connectorType != '${ct}'
            OR marketType != '${mt}'
       );
-    `).catch(() => null);
+    `,
+        )
+        .catch(() => null);
 
       // 4. Дропаем основную symbols
       await this.reader.query(`DROP TABLE IF EXISTS symbols;`);
 
       // 5. Переносим новую таблицу на её место
-      await this.reader.query(`RENAME TABLE symbols_clean TO symbols;`)
+      await this.reader
+        .query(`RENAME TABLE symbols_clean TO symbols;`)
         .catch(() => null);
     });
 
     return SymbolRepository.deleteLock;
   }
-
 
   // /**
   //  * Вставка одного символа через ILP.
@@ -118,7 +124,6 @@ export class SymbolRepository {
   //     },
   //     timestamp: tsNs,
   //   };
-
 
   //   console.log("insert symbol")
 
@@ -183,8 +188,7 @@ export class SymbolRepository {
       });
     });
 
-
-    console.log("insert lines")
+    console.log('insert lines');
 
     // 🔹 ОДИН bulk-запрос вместо тысяч SQL-INSERT
     await this.ilpWriter.writeMany(lines);

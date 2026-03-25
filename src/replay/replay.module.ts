@@ -7,21 +7,15 @@ import { QuestDBModule } from '../questdb/questdb.module';
 import { EventSinkModule } from '../questdb/event-sink/event-sink.module';
 
 @Module({
-    imports: [
-        QuestDBModule,                         // даёт QuestDBQueryService
-        forwardRef(() => EventSinkModule),     // даёт EventSinkRepository
-    ],
+  imports: [
+    QuestDBModule, // даёт QuestDBQueryService
+    forwardRef(() => EventSinkModule), // даёт EventSinkRepository
+  ],
 
-    providers: [
-        ReplayService,
-    ],
+  providers: [ReplayService],
 
-    controllers: [
-        ReplayController,
-    ],
+  controllers: [ReplayController],
 
-    exports: [
-        ReplayService,
-    ],
+  exports: [ReplayService],
 })
-export class ReplayModule { }
+export class ReplayModule {}

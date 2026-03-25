@@ -6,10 +6,9 @@ import { QuestDBModule } from '../questdb/questdb.module';
 import { BinanceModule } from '../connector/datasource/binance/binance.module';
 
 @Module({
-    imports: [CandleModule, QuestDBModule, BinanceModule],
-    controllers: [SignalsController],
-    providers: [SignalsService],
-    exports: [SignalsService],
+  imports: [CandleModule, QuestDBModule, BinanceModule],
+  controllers: [SignalsController],
+  providers: [SignalsService],
+  exports: [SignalsService],
 })
-export class SignalsModule { }
-
+export class SignalsModule {}

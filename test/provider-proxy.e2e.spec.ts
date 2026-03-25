@@ -10,11 +10,16 @@ describe('Provider proxy coverage (e2e)', () => {
   let app: INestApplication;
 
   const mockDetectorProxy = {
-    request: jest.fn().mockResolvedValue({ status: 200, data: { ok: true, from: 'detector' } }),
+    request: jest
+      .fn()
+      .mockResolvedValue({ status: 200, data: { ok: true, from: 'detector' } }),
     get: jest.fn().mockResolvedValue({ status: 200, data: { ok: true } }),
   };
   const mockInspectorProxy = {
-    request: jest.fn().mockResolvedValue({ status: 200, data: { ok: true, from: 'inspector' } }),
+    request: jest.fn().mockResolvedValue({
+      status: 200,
+      data: { ok: true, from: 'inspector' },
+    }),
     get: jest.fn().mockResolvedValue({ status: 200, data: { ok: true } }),
   };
   const mockAdvisorProxy = {

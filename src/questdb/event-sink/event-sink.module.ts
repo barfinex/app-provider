@@ -19,44 +19,42 @@ import { TradeEventAdapter } from './adapters/trade.adapter';
 import { QuestDBModule } from '../questdb.module';
 
 @Module({
-    imports: [
-        forwardRef(() => QuestDBModule), // ← фикс цикла
-    ],
+  imports: [
+    forwardRef(() => QuestDBModule), // ← фикс цикла
+  ],
 
-    controllers: [
-        EventSinkController,
-    ],
+  controllers: [EventSinkController],
 
-    providers: [
-        EventSinkRepository,
+  providers: [
+    EventSinkRepository,
 
-        {
-            provide: APP_INTERCEPTOR,
-            useClass: EventSinkInterceptor,
-        },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: EventSinkInterceptor,
+    },
 
-        // adapters
-        CandleEventAdapter,
-        ConnectorEventAdapter,
-        DetectorEventAdapter,
-        InspectorEventAdapter,
-        OrderEventAdapter,
-        OrderBookEventAdapter,
-        SymbolEventAdapter,
-        TradeEventAdapter,
-    ],
+    // adapters
+    CandleEventAdapter,
+    ConnectorEventAdapter,
+    DetectorEventAdapter,
+    InspectorEventAdapter,
+    OrderEventAdapter,
+    OrderBookEventAdapter,
+    SymbolEventAdapter,
+    TradeEventAdapter,
+  ],
 
-    exports: [
-        EventSinkRepository,
+  exports: [
+    EventSinkRepository,
 
-        CandleEventAdapter,
-        ConnectorEventAdapter,
-        DetectorEventAdapter,
-        InspectorEventAdapter,
-        OrderEventAdapter,
-        OrderBookEventAdapter,
-        SymbolEventAdapter,
-        TradeEventAdapter,
-    ],
+    CandleEventAdapter,
+    ConnectorEventAdapter,
+    DetectorEventAdapter,
+    InspectorEventAdapter,
+    OrderEventAdapter,
+    OrderBookEventAdapter,
+    SymbolEventAdapter,
+    TradeEventAdapter,
+  ],
 })
-export class EventSinkModule { }
+export class EventSinkModule {}

@@ -74,7 +74,10 @@ describe('QuestDBWriteService', () => {
       const svc = await createService();
       const ts = BigInt(Date.now()) * 1_000_000n;
       svc.write('candles', ilp(ts, 'BTCUSDT'));
-      svc.write('candles', { ...ilp(ts, 'BTCUSDT'), fields: { price: 101, volume: 2 } });
+      svc.write('candles', {
+        ...ilp(ts, 'BTCUSDT'),
+        fields: { price: 101, volume: 2 },
+      });
       await new Promise((r) => setTimeout(r, 5));
       await svc.flushOnce();
       const m = svc.getMetrics();

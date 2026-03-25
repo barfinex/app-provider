@@ -27,49 +27,60 @@ import { QuestDBModule } from '../../../questdb/questdb.module';
 import { QuestDbIlpModule } from '../../../questdb/ilp/questdb-ilp.module';
 import { EventSinkModule } from '../../../questdb/event-sink/event-sink.module';
 import { ProviderMarketdataMetricsService } from '../../../runtime/provider-marketdata-metrics.service';
+import { HorizontalVolumeProfileService } from './horizontal-volume-profile.service';
+import { LiquidityMapService } from './liquidity-map.service';
+import { OwnershipModule } from '../../../ownership/ownership.module';
+import { DiagnosticsModule } from '../../../diagnostics/diagnostics.module';
 
 @Module({
-    imports: [
-        // ✅ даёт ConfigService
-        ConfigModule,
+  imports: [
+    // ✅ даёт ConfigService
+    ConfigModule,
 
-        // CandleService
-        forwardRef(() => CandleModule),
+    DiagnosticsModule,
 
-        // SymbolRepository deps
-        QuestDBModule,
-        QuestDbIlpModule,
-        forwardRef(() => EventSinkModule),
-    ],
+    // CandleService
+    forwardRef(() => CandleModule),
 
-    providers: [
-        // CORE
-        BinanceClientService,
-        BinanceRedisService,
+    // SymbolRepository deps
+    QuestDBModule,
+    QuestDbIlpModule,
+    forwardRef(() => EventSinkModule),
 
-        // API
-        BinanceAccountApi,
-        BinanceMarketApi,
-        BinanceOrderApi,
+    // Ownership for fencing checks in ingestion handlers
+    OwnershipModule,
+  ],
 
-        // WS
-        BinanceWsManager,
-        BinanceSubscriptionService,
-        ProviderMarketdataMetricsService,
+  providers: [
+    // CORE
+    BinanceClientService,
+    BinanceRedisService,
 
-        // FACADE
-        BinanceService,
+    // API
+    BinanceAccountApi,
+    BinanceMarketApi,
+    BinanceOrderApi,
 
-        // EXTERNAL
-        WebSocketService,
-        SymbolRepository,
-    ],
+    // WS
+    BinanceWsManager,
+    BinanceSubscriptionService,
+    ProviderMarketdataMetricsService,
+    HorizontalVolumeProfileService,
+    LiquidityMapService,
 
-    exports: [
-        BinanceService,
-        BinanceClientService,
-        BinanceRedisService,
-        BinanceWsManager,
-    ],
+    // FACADE
+    BinanceService,
+
+    // EXTERNAL
+    WebSocketService,
+    SymbolRepository,
+  ],
+
+  exports: [
+    BinanceService,
+    BinanceClientService,
+    BinanceRedisService,
+    BinanceWsManager,
+  ],
 })
-export class BinanceModule { }
+export class BinanceModule {}

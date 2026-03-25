@@ -1,4 +1,9 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
 import * as net from 'net';
 import { Counter, Histogram, register } from 'prom-client';
 
@@ -10,9 +15,18 @@ export interface ILPWriteOptions {
   timestampNs?: bigint;
 }
 
-export type SocketChannel = 'main' | 'trades' | 'candles' | 'orderbook' | 'events';
+export type SocketChannel =
+  | 'main'
+  | 'trades'
+  | 'candles'
+  | 'orderbook'
+  | 'events';
 
-export type ConnectionState = 'DISCONNECTED' | 'CONNECTING' | 'CONNECTED' | 'RECONNECTING';
+export type ConnectionState =
+  | 'DISCONNECTED'
+  | 'CONNECTING'
+  | 'CONNECTED'
+  | 'RECONNECTING';
 
 type QueueItem = { channel: SocketChannel; line: string };
 
@@ -22,7 +36,13 @@ type DrainWaitState = {
   timeout: NodeJS.Timeout;
 };
 
-const SOCKET_CHANNELS: SocketChannel[] = ['main', 'trades', 'candles', 'orderbook', 'events'];
+const SOCKET_CHANNELS: SocketChannel[] = [
+  'main',
+  'trades',
+  'candles',
+  'orderbook',
+  'events',
+];
 
 /** Single managed ILP connection: one TCP socket, one queue, batch flush, circuit breaker. */
 @Injectable()
@@ -30,9 +50,9 @@ export class QuestDBWriteService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger('QuestDBWrite');
   private readonly debugEnabled = process.env.QUESTDB_DEBUG === 'true';
 
-  private readonly configuredHost = (
-    process.env.QUESTDB_HOST || '127.0.0.1'
-  ).trim().replace(/^localhost$/i, '127.0.0.1');
+  private readonly configuredHost = (process.env.QUESTDB_HOST || '127.0.0.1')
+    .trim()
+    .replace(/^localhost$/i, '127.0.0.1');
   private host = this.configuredHost;
   private readonly hasIpv4Fallback = false;
   private readonly port = Number(process.env.QUESTDB_ILP_PORT || 9009);
@@ -97,11 +117,17 @@ export class QuestDBWriteService implements OnModuleInit, OnModuleDestroy {
   private readonly ADAPTIVE_BATCH_TIERS = [100, 500, 1000, 2000] as const;
   private readonly BACKPRESSURE_WARN_PCT = Math.min(
     100,
-    Math.max(0, Number(process.env.PROVIDER_QUESTDB_BACKPRESSURE_WARN_PCT || 80)),
+    Math.max(
+      0,
+      Number(process.env.PROVIDER_QUESTDB_BACKPRESSURE_WARN_PCT || 80),
+    ),
   );
   private readonly BACKPRESSURE_DROP_PCT = Math.min(
     100,
-    Math.max(0, Number(process.env.PROVIDER_QUESTDB_BACKPRESSURE_DROP_PCT || 95)),
+    Math.max(
+      0,
+      Number(process.env.PROVIDER_QUESTDB_BACKPRESSURE_DROP_PCT || 95),
+    ),
   );
   private readonly COALESCE_WINDOW_MS = Math.max(
     0,
@@ -121,7 +147,9 @@ export class QuestDBWriteService implements OnModuleInit, OnModuleDestroy {
 
   private readonly CONNECT_TIMEOUT_MS = 2_000;
   private static readonly WARN_THROTTLE_MS = 2_000;
-  private static readonly DRAIN_WAIT_MS = Number(process.env.QUESTDB_DRAIN_WAIT_MS || 30_000);
+  private static readonly DRAIN_WAIT_MS = Number(
+    process.env.QUESTDB_DRAIN_WAIT_MS || 30_000,
+  );
 
   private isRunning = false;
   private destroyed = false;
@@ -183,8 +211,11 @@ export class QuestDBWriteService implements OnModuleInit, OnModuleDestroy {
   /** Write latency: last successful write round-trip (ms). */
   private lastWriteLatencyMs = 0;
 
-  /** Coalescing buffer: key = table|timestampNs|symbol. */
-  private coalesceBuffer = new Map<string, { channel: SocketChannel; opts: ILPWriteOptions }>();
+  /** Coalescing buffer: key = table|timestampNs|all_tag_keys. */
+  private coalesceBuffer = new Map<
+    string,
+    { channel: SocketChannel; opts: ILPWriteOptions }
+  >();
   private coalesceFlushScheduled: NodeJS.Timeout | null = null;
   private coalesceAppliedCount = 0;
 
@@ -214,9 +245,18 @@ export class QuestDBWriteService implements OnModuleInit, OnModuleDestroy {
 
   private initPrometheusMetrics(): void {
     this.dropCounters = {
-      overflow: this.getOrCreateCounter('questdb_write_dropped_overflow_total', 'Rows dropped due to queue overflow (trim to capacity)'),
-      backpressure: this.getOrCreateCounter('questdb_write_dropped_backpressure_total', 'Rows dropped due to backpressure (DROP_OLDEST)'),
-      shutdown: this.getOrCreateCounter('questdb_write_dropped_shutdown_total', 'Rows dropped during shutdown (buffer not drained)'),
+      overflow: this.getOrCreateCounter(
+        'questdb_write_dropped_overflow_total',
+        'Rows dropped due to queue overflow (trim to capacity)',
+      ),
+      backpressure: this.getOrCreateCounter(
+        'questdb_write_dropped_backpressure_total',
+        'Rows dropped due to backpressure (DROP_OLDEST)',
+      ),
+      shutdown: this.getOrCreateCounter(
+        'questdb_write_dropped_shutdown_total',
+        'Rows dropped during shutdown (buffer not drained)',
+      ),
     };
     this.latencyHistogram = this.getOrCreateLatencyHistogram();
   }
@@ -374,7 +414,10 @@ export class QuestDBWriteService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Blocking batch write: enqueue then flush and wait until queue drained. */
-  async writeBatch(channel: SocketChannel, batch: ILPWriteOptions[]): Promise<void> {
+  async writeBatch(
+    channel: SocketChannel,
+    batch: ILPWriteOptions[],
+  ): Promise<void> {
     if (!batch.length) return;
     this.enqueueBatch(channel, batch);
     await this.waitUntilBelow(0);
@@ -411,7 +454,9 @@ export class QuestDBWriteService implements OnModuleInit, OnModuleDestroy {
     const url = `http://${this.host}:${this.httpPort}/write?precision=ns`;
     if (!options?.quiet) {
       this.logger.log(
-        `QuestDB HTTP ILP write channel=${channel} rows=${lines.length} table=${batch[0]?.table ?? '?'}`,
+        `QuestDB HTTP ILP write channel=${channel} rows=${lines.length} table=${
+          batch[0]?.table ?? '?'
+        }`,
       );
     }
 
@@ -423,7 +468,9 @@ export class QuestDBWriteService implements OnModuleInit, OnModuleDestroy {
     if (!res.ok) {
       const text = await res.text();
       throw new Error(
-        `QuestDB HTTP ILP write failed channel=${channel} status=${res.status} error=${text.slice(0, 200)}`,
+        `QuestDB HTTP ILP write failed channel=${channel} status=${
+          res.status
+        } error=${text.slice(0, 200)}`,
       );
     }
   }
@@ -483,36 +530,54 @@ export class QuestDBWriteService implements OnModuleInit, OnModuleDestroy {
         this.lastBatchSize = batch.length;
         const payload = batch.map((i) => i.line).join('\n') + '\n';
 
-        const writeStartedAt = Date.now();
-        const ok = this.socket.write(payload, (err) => {
-          if (!err) {
-            this.writeSuccessTotal += 1;
-            this.consecutiveWriteFailures = 0;
-            if (this.circuitOpenUntil > 0) {
-              this.circuitOpenUntil = 0;
-              this.circuitOpenedAt = 0;
-              this.circuitOpenLoggedSustained = false;
-            }
-            return;
-          }
-          this.writeFailuresTotal += 1;
-          this.consecutiveWriteFailures += 1;
-          if (
-            this.consecutiveWriteFailures >= this.CIRCUIT_FAILURE_THRESHOLD &&
-            this.circuitOpenUntil === 0
-          ) {
-            const now = Date.now();
-            this.circuitOpenUntil = now + this.CIRCUIT_COOLDOWN_MS;
-            this.circuitOpenedAt = now;
-            this.circuitOpenLoggedSustained = false;
-            this.logStructured('writer_paused', {
-              consecutiveFailures: this.consecutiveWriteFailures,
-              cooldownMs: this.CIRCUIT_COOLDOWN_MS,
-            });
-          }
+        // Avoid writing on a half-closed or destroyed socket (prevents EPIPE from writeAfterFIN)
+        if (this.socket.destroyed || !this.socket.writable) {
           this.queue.unshift(...batch);
-          this.handleSocketFailure('write failure', err);
-        });
+          this.handleSocketFailure('write_skipped_socket_closed');
+          continue;
+        }
+
+        const writeStartedAt = Date.now();
+        let ok: boolean;
+        try {
+          ok = this.socket.write(payload, (err) => {
+            if (!err) {
+              this.writeSuccessTotal += 1;
+              this.consecutiveWriteFailures = 0;
+              if (this.circuitOpenUntil > 0) {
+                this.circuitOpenUntil = 0;
+                this.circuitOpenedAt = 0;
+                this.circuitOpenLoggedSustained = false;
+              }
+              return;
+            }
+            this.writeFailuresTotal += 1;
+            this.consecutiveWriteFailures += 1;
+            if (
+              this.consecutiveWriteFailures >= this.CIRCUIT_FAILURE_THRESHOLD &&
+              this.circuitOpenUntil === 0
+            ) {
+              const now = Date.now();
+              this.circuitOpenUntil = now + this.CIRCUIT_COOLDOWN_MS;
+              this.circuitOpenedAt = now;
+              this.circuitOpenLoggedSustained = false;
+              this.logStructured('writer_paused', {
+                consecutiveFailures: this.consecutiveWriteFailures,
+                cooldownMs: this.CIRCUIT_COOLDOWN_MS,
+              });
+            }
+            this.queue.unshift(...batch);
+            this.handleSocketFailure('write failure', err);
+          });
+        } catch (writeErr: unknown) {
+          const err =
+            writeErr instanceof Error
+              ? (writeErr as Error & { code?: string })
+              : new Error(String(writeErr));
+          this.queue.unshift(...batch);
+          this.handleSocketFailure('write threw (e.g. EPIPE)', err);
+          continue;
+        }
 
         if (!ok) {
           const now = Date.now();
@@ -561,12 +626,21 @@ export class QuestDBWriteService implements OnModuleInit, OnModuleDestroy {
 
   getMetrics() {
     const bufferSizeByChannel = Object.fromEntries(
-      SOCKET_CHANNELS.map((ch) => [ch, this.queue.filter((i) => i.channel === ch).length]),
+      SOCKET_CHANNELS.map((ch) => [
+        ch,
+        this.queue.filter((i) => i.channel === ch).length,
+      ]),
     ) as Record<SocketChannel, number>;
     const total = this.totalQueued();
 
     return {
-      connected: { main: this.connected ? 1 : 0, trades: 0, candles: 0, orderbook: 0, events: 0 },
+      connected: {
+        main: this.connected ? 1 : 0,
+        trades: 0,
+        candles: 0,
+        orderbook: 0,
+        events: 0,
+      },
       buffers: bufferSizeByChannel,
       limits: {
         MAX_BATCH_SIZE: this.WRITE_BATCH_SIZE,
@@ -576,7 +650,13 @@ export class QuestDBWriteService implements OnModuleInit, OnModuleDestroy {
       },
       questdb_writer_connected: {
         total: this.connected ? 1 : 0,
-        channels: { main: this.connected ? 1 : 0, trades: 0, candles: 0, orderbook: 0, events: 0 },
+        channels: {
+          main: this.connected ? 1 : 0,
+          trades: 0,
+          candles: 0,
+          orderbook: 0,
+          events: 0,
+        },
       },
       questdb_writer_buffer_size: {
         total,
@@ -584,7 +664,13 @@ export class QuestDBWriteService implements OnModuleInit, OnModuleDestroy {
       },
       questdb_writer_reconnect_attempts: {
         total: this.reconnectAttempts,
-        channels: { main: this.reconnectAttempts, trades: 0, candles: 0, orderbook: 0, events: 0 },
+        channels: {
+          main: this.reconnectAttempts,
+          trades: 0,
+          candles: 0,
+          orderbook: 0,
+          events: 0,
+        },
       },
       questdb_writer_dropped_rows: {
         total: this.droppedRowsTotal,
@@ -592,11 +678,23 @@ export class QuestDBWriteService implements OnModuleInit, OnModuleDestroy {
       },
       questdb_writer_reconnect_total: { total: this.reconnectTriggeredTotal },
       questdb_writer_connection_state: {
-        channels: { main: this.connectionState, trades: 'DISCONNECTED', candles: 'DISCONNECTED', orderbook: 'DISCONNECTED', events: 'DISCONNECTED' },
+        channels: {
+          main: this.connectionState,
+          trades: 'DISCONNECTED',
+          candles: 'DISCONNECTED',
+          orderbook: 'DISCONNECTED',
+          events: 'DISCONNECTED',
+        },
       },
       questdb_writer_write_failures_total: {
         total: this.writeFailuresTotal,
-        channels: { main: this.writeFailuresTotal, trades: 0, candles: 0, orderbook: 0, events: 0 },
+        channels: {
+          main: this.writeFailuresTotal,
+          trades: 0,
+          candles: 0,
+          orderbook: 0,
+          events: 0,
+        },
       },
       questdb_write_queue_size: total,
       questdb_write_batch_size: this.lastBatchSize,
@@ -609,7 +707,12 @@ export class QuestDBWriteService implements OnModuleInit, OnModuleDestroy {
       questdb_write_dropped_backpressure_total: this.droppedBackpressureTotal,
       questdb_write_dropped_shutdown_total: this.droppedShutdownTotal,
       questdb_circuit_state: this.isCircuitOpen() ? 1 : 0,
-      questdb_backpressure_state: this.getBackpressureState() === 'ok' ? 0 : this.getBackpressureState() === 'warn' ? 1 : 2,
+      questdb_backpressure_state:
+        this.getBackpressureState() === 'ok'
+          ? 0
+          : this.getBackpressureState() === 'warn'
+          ? 1
+          : 2,
       questdb_batch_size_current: this.batchSizeCurrent,
     };
   }
@@ -635,7 +738,10 @@ export class QuestDBWriteService implements OnModuleInit, OnModuleDestroy {
   private updateBatchSizeMetric(newSize: number): void {
     if (newSize === this.batchSizeCurrent) return;
     const now = Date.now();
-    if (now - this.lastBatchSizeChangeAt >= QuestDBWriteService.BATCH_SIZE_CHANGE_LOG_THROTTLE_MS) {
+    if (
+      now - this.lastBatchSizeChangeAt >=
+      QuestDBWriteService.BATCH_SIZE_CHANGE_LOG_THROTTLE_MS
+    ) {
       this.lastBatchSizeChangeAt = now;
       this.logStructured('batch_size_changed', {
         previous: this.batchSizeCurrent,
@@ -674,7 +780,8 @@ export class QuestDBWriteService implements OnModuleInit, OnModuleDestroy {
       const prevTotal = this.droppedRowsTotal;
       this.droppedRowsTotal += 1;
       this.droppedOverflowTotal += 1;
-      this.droppedRowsByChannel[channel] = (this.droppedRowsByChannel[channel] ?? 0) + 1;
+      this.droppedRowsByChannel[channel] =
+        (this.droppedRowsByChannel[channel] ?? 0) + 1;
       this.dropCounters?.overflow.inc();
       this.logDropAlertFirstTime(prevTotal);
       this.logStructured('write_dropped', {
@@ -775,14 +882,25 @@ export class QuestDBWriteService implements OnModuleInit, OnModuleDestroy {
   }
 
   // ================================================================
-  // Coalescing (optional: merge rows same table + timestamp + symbol).
+  // Coalescing (optional: merge rows same table + timestamp + series tags).
   // Applied only to channels in COALESCE_CHANNELS (default: candles).
   // Trades, orderbook, events are not coalesced for semantic correctness.
   // ================================================================
-  private coalescerKey(table: string, timestampNs: bigint, keys: Record<string, string | number>): string {
-    const symbol = keys?.symbol ?? '';
-    return `${table}|${timestampNs.toString()}|${String(symbol)}`;
+  private coalescerKey(
+    table: string,
+    timestampNs: bigint,
+    keys: Record<string, string | number>,
+  ): string {
+    const keyParts = Object.entries(keys ?? {})
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([k, v]) => `${k}=${String(v)}`);
+    return `${table}|${timestampNs.toString()}|${keyParts.join('|')}`;
   }
+
+  private static readonly COALESCE_BUFFER_MAX_SIZE = Math.max(
+    100,
+    Number(process.env.PROVIDER_QUESTDB_COALESCE_BUFFER_MAX_SIZE ?? 50_000),
+  );
 
   private pushToCoalescer(channel: SocketChannel, opts: ILPWriteOptions): void {
     const ts = opts.timestampNs ?? this.nowNs();
@@ -795,9 +913,19 @@ export class QuestDBWriteService implements OnModuleInit, OnModuleDestroy {
       existing.opts = { ...existing.opts, fields: mergedFields };
       this.coalesceAppliedCount += 1;
     } else {
+      if (
+        this.coalesceBuffer.size >= QuestDBWriteService.COALESCE_BUFFER_MAX_SIZE
+      ) {
+        this.flushCoalescer();
+      }
       this.coalesceBuffer.set(key, {
         channel,
-        opts: { table, keys, fields: { ...(opts.fields ?? {}) }, timestampNs: ts },
+        opts: {
+          table,
+          keys,
+          fields: { ...(opts.fields ?? {}) },
+          timestampNs: ts,
+        },
       });
     }
   }
@@ -814,10 +942,18 @@ export class QuestDBWriteService implements OnModuleInit, OnModuleDestroy {
     if (this.coalesceBuffer.size === 0) return;
     const applied = this.coalesceAppliedCount;
     if (applied > 0) {
-      this.logStructured('coalesce_applied', { mergedRows: applied, flushedKeys: this.coalesceBuffer.size });
+      this.logStructured('coalesce_applied', {
+        mergedRows: applied,
+        flushedKeys: this.coalesceBuffer.size,
+      });
     }
     for (const { channel, opts } of this.coalesceBuffer.values()) {
-      const line = this.buildILP(opts.table, opts.keys ?? {}, opts.fields ?? {}, opts.timestampNs ?? this.nowNs());
+      const line = this.buildILP(
+        opts.table,
+        opts.keys ?? {},
+        opts.fields ?? {},
+        opts.timestampNs ?? this.nowNs(),
+      );
       if (line) this.enqueue(channel, line);
     }
     this.coalesceBuffer.clear();
@@ -861,13 +997,18 @@ export class QuestDBWriteService implements OnModuleInit, OnModuleDestroy {
       if (attempt === 1) {
         await this.sleep(backoffMs);
       } else {
-        const jitter = Math.floor(Math.random() * (Math.min(500, delay / 2) + 1));
+        const jitter = Math.floor(
+          Math.random() * (Math.min(500, delay / 2) + 1),
+        );
         await this.sleep(delay + jitter);
         delay = Math.min(delay * 2, this.RECONNECT_MAX_MS);
       }
 
       const now = Date.now();
-      if (now - this.lastReconnectLogAt >= QuestDBWriteService.RECONNECT_LOG_THROTTLE_MS) {
+      if (
+        now - this.lastReconnectLogAt >=
+        QuestDBWriteService.RECONNECT_LOG_THROTTLE_MS
+      ) {
         this.lastReconnectLogAt = now;
         this.debug(
           `QuestDB reconnect_attempt attempt=${attempt} backoffMs=${backoffMs} queuePending=${this.queue.length}`,
@@ -961,7 +1102,10 @@ export class QuestDBWriteService implements OnModuleInit, OnModuleDestroy {
     return true;
   }
 
-  private handleSocketFailure(reason: string, err?: Error & { code?: string }): void {
+  private handleSocketFailure(
+    reason: string,
+    err?: Error & { code?: string },
+  ): void {
     const code = String(err?.code ?? '');
     const isConnectionError =
       code === 'EPIPE' ||
@@ -976,7 +1120,10 @@ export class QuestDBWriteService implements OnModuleInit, OnModuleDestroy {
 
     const queuePending = this.queue.length;
     const now = Date.now();
-    if (now - this.lastReconnectLogAt >= QuestDBWriteService.RECONNECT_LOG_THROTTLE_MS) {
+    if (
+      now - this.lastReconnectLogAt >=
+      QuestDBWriteService.RECONNECT_LOG_THROTTLE_MS
+    ) {
       this.lastReconnectLogAt = now;
       if (isConnectionError) {
         this.logStructured('connection_lost', {
@@ -1107,7 +1254,9 @@ export class QuestDBWriteService implements OnModuleInit, OnModuleDestroy {
     timestampNs: bigint,
   ): string | null {
     if (timestampNs <= 0n) {
-      this.logger.warn(`ILP drop row: table=${table} invalid timestampNs=${timestampNs}`);
+      this.logger.warn(
+        `ILP drop row: table=${table} invalid timestampNs=${timestampNs}`,
+      );
       return null;
     }
 
@@ -1126,7 +1275,9 @@ export class QuestDBWriteService implements OnModuleInit, OnModuleDestroy {
       .filter(([, v]) => v !== undefined && v !== null)
       .map(([k, v]) => `${this.escapeTagKey(k)}=${this.escapeTagValue(v)}`);
 
-    return `${measurement}${tagParts.length ? ',' + tagParts.join(',') : ''} ${fieldParts.join(',')} ${timestampNs.toString()}`;
+    return `${measurement}${
+      tagParts.length ? ',' + tagParts.join(',') : ''
+    } ${fieldParts.join(',')} ${timestampNs.toString()}`;
   }
 
   private formatField(key: string, value: any): string | null {
@@ -1137,26 +1288,62 @@ export class QuestDBWriteService implements OnModuleInit, OnModuleDestroy {
       return `${k}="${v}"`;
     }
 
-    if (typeof value === 'boolean') return `${k}=${value ? 1 : 0}`;
-    if (typeof value === 'number') return Number.isFinite(value) ? `${k}=${value}` : null;
-    if (typeof value === 'bigint') return `${k}=${value.toString()}`;
+    if (typeof value === 'boolean') return `${k}=${value ? 't' : 'f'}`;
+    if (typeof value === 'number')
+      return Number.isFinite(value) ? `${k}=${value}` : null;
+    if (typeof value === 'bigint') return `${k}=${value.toString()}i`;
 
     return null;
   }
 
+  private static readonly RE_MEASUREMENT = /[, ]/g;
+  private static readonly RE_TAG = /[,= ]/g;
+  private static readonly RE_FIELD_STR = /["\\\n\r]/g;
+
+  private static readonly MEASUREMENT_MAP: Record<string, string> = {
+    ',': '\\,',
+    ' ': '\\ ',
+  };
+  private static readonly TAG_MAP: Record<string, string> = {
+    ',': '\\,',
+    '=': '\\=',
+    ' ': '\\ ',
+  };
+  private static readonly FIELD_STR_MAP: Record<string, string> = {
+    '"': '\\"',
+    '\\': '\\\\',
+    '\n': '\\n',
+    '\r': '\\r',
+  };
+
   private escapeMeasurement(s: string): string {
-    return String(s).replace(/,/g, '\\,').replace(/ /g, '\\ ');
+    return String(s).replace(
+      QuestDBWriteService.RE_MEASUREMENT,
+      (ch) => QuestDBWriteService.MEASUREMENT_MAP[ch] ?? ch,
+    );
   }
   private escapeTagKey(s: string): string {
-    return String(s).replace(/,/g, '\\,').replace(/=/g, '\\=').replace(/ /g, '\\ ');
+    return String(s).replace(
+      QuestDBWriteService.RE_TAG,
+      (ch) => QuestDBWriteService.TAG_MAP[ch] ?? ch,
+    );
   }
   private escapeTagValue(v: any): string {
-    return String(v).replace(/,/g, '\\,').replace(/=/g, '\\=').replace(/ /g, '\\ ');
+    return String(v).replace(
+      QuestDBWriteService.RE_TAG,
+      (ch) => QuestDBWriteService.TAG_MAP[ch] ?? ch,
+    );
   }
   private escapeFieldKey(s: string): string {
-    return String(s).replace(/,/g, '\\,').replace(/=/g, '\\=').replace(/ /g, '\\ ');
+    return String(s).replace(
+      QuestDBWriteService.RE_TAG,
+      (ch) => QuestDBWriteService.TAG_MAP[ch] ?? ch,
+    );
   }
   private escapeFieldString(s: string): string {
-    return String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    return String(s).replace(
+      QuestDBWriteService.RE_FIELD_STR,
+      (ch) => QuestDBWriteService.FIELD_STR_MAP[ch] ?? ch,
+    );
   }
 }

@@ -29,12 +29,23 @@ export class AppRegistryRepository {
       version: row.version ? String(row.version) : undefined,
       ip: row.ip ? String(row.ip) : undefined,
       meta,
-      status: (String(row.status ?? 'registered') as 'registered' | 'unregistered'),
-      registeredAt: Number(row.registeredAt ?? 0),
-      lastHeartbeatAt: Number(row.lastHeartbeatAt ?? 0),
-      updatedAt: Number(row.updatedAt ?? 0),
-      unregisteredAt: row.unregisteredAt ? Number(row.unregisteredAt) : null,
+      status: String(row.status ?? 'registered') as
+        | 'registered'
+        | 'unregistered',
+      registeredAt: this.toMs(row.registeredAt),
+      lastHeartbeatAt: this.toMs(row.lastHeartbeatAt),
+      updatedAt: this.toMs(row.updatedAt),
+      unregisteredAt: row.unregisteredAt ? this.toMs(row.unregisteredAt) : null,
     };
+  }
+
+  /** Normalize timestamp to ms. QuestDB may return seconds, microseconds, or ms. */
+  private toMs(v: unknown): number {
+    const n = Number(v ?? 0);
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    if (n > 1e15) return Math.round(n / 1000); // microseconds → ms
+    if (n < 1e12) return Math.round(n * 1000); // seconds → ms
+    return Math.round(n); // already ms
   }
 
   async findAll(): Promise<RegisteredAppEntity[]> {
@@ -55,10 +66,13 @@ export class AppRegistryRepository {
       FROM app_registry
       ORDER BY updatedAt DESC
     `);
-    return rows.map(row => this.rowToEntity(row));
+    return rows.map((row) => this.rowToEntity(row));
   }
 
-  async findOne(appType: RegisteredAppType, appKey: string): Promise<RegisteredAppEntity | null> {
+  async findOne(
+    appType: RegisteredAppType,
+    appKey: string,
+  ): Promise<RegisteredAppEntity | null> {
     const row = await this.reader.queryOne(`
       SELECT
         appKey,
@@ -120,14 +134,18 @@ export class AppRegistryRepository {
       UPDATE app_registry
       SET
         baseUrl='${this.esc(entity.baseUrl)}',
-        displayName=${entity.displayName ? `'${this.esc(entity.displayName)}'` : 'null'},
+        displayName=${
+          entity.displayName ? `'${this.esc(entity.displayName)}'` : 'null'
+        },
         version=${entity.version ? `'${this.esc(entity.version)}'` : 'null'},
         ip=${entity.ip ? `'${this.esc(entity.ip)}'` : 'null'},
         meta='${this.esc(JSON.stringify(entity.meta ?? {}))}',
         status='${this.esc(entity.status)}',
         lastHeartbeatAt=${entity.lastHeartbeatAt},
         unregisteredAt=${entity.unregisteredAt ?? 'null'}
-      WHERE appType='${this.esc(entity.appType)}' AND appKey='${this.esc(entity.appKey)}'
+      WHERE appType='${this.esc(entity.appType)}' AND appKey='${this.esc(
+      entity.appKey,
+    )}'
     `);
   }
 }

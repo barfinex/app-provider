@@ -9,8 +9,16 @@ export class ProviderMarketdataMetricsService {
     this.marketDataLagGauge = this.getOrCreateLagGauge();
   }
 
-  observeMarketDataLag(stream: string, marketType: string, eventTimestampMs?: number): void {
-    if (!Number.isFinite(eventTimestampMs) || !eventTimestampMs || eventTimestampMs <= 0) {
+  observeMarketDataLag(
+    stream: string,
+    marketType: string,
+    eventTimestampMs?: number,
+  ): void {
+    if (
+      !Number.isFinite(eventTimestampMs) ||
+      !eventTimestampMs ||
+      eventTimestampMs <= 0
+    ) {
       return;
     }
 
@@ -23,7 +31,9 @@ export class ProviderMarketdataMetricsService {
     byStream: Record<string, number>;
   }> {
     const metrics = await register.getMetricsAsJSON();
-    const lagMetric = metrics.find((metric) => metric.name === 'provider_marketdata_lag_ms');
+    const lagMetric = metrics.find(
+      (metric) => metric.name === 'provider_marketdata_lag_ms',
+    );
     const values = lagMetric?.values || [];
     const byStream: Record<string, number> = {};
     let maxLagMs = 0;

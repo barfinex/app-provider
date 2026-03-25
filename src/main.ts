@@ -1,14 +1,20 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { RequestMethod, ValidationPipe, type LogLevel } from '@nestjs/common';
+import {
+  Logger,
+  RequestMethod,
+  ValidationPipe,
+  type LogLevel,
+} from '@nestjs/common';
+import { ProviderBootstrapService } from './runtime/provider-bootstrap.service';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import 'reflect-metadata';
 import { applyProviderWsAdapter } from '@barfinex/provider-ws-bridge';
+import { ConfigService } from '@barfinex/config';
 
 import * as dotenv from 'dotenv';
 import { resolve } from 'path';
 import * as fs from 'fs';
-import { execSync } from 'child_process';
 
 const PROVIDER_BOOTSTRAP_GUARD = '__BARFINEX_PROVIDER_BOOTSTRAP_STARTED__';
 const PROVIDER_ERROR_GUARD = '__BARFINEX_PROVIDER_ERROR_GUARD_INSTALLED__';
@@ -20,9 +26,18 @@ const PROVIDER_BOOTSTRAP_RETRY_MAX_MS = Math.max(
   PROVIDER_BOOTSTRAP_RETRY_BASE_MS,
   Number(process.env.PROVIDER_BOOTSTRAP_RETRY_MAX_MS || 30_000),
 );
+/** After nodemon restart the old process may still hold the port. Retry listen a few times with short delay. */
+const EADDRINUSE_RETRY_ATTEMPTS = Number(
+  process.env.PROVIDER_EADDRINUSE_RETRY_ATTEMPTS || 5,
+);
+const EADDRINUSE_RETRY_DELAY_MS = Number(
+  process.env.PROVIDER_EADDRINUSE_RETRY_DELAY_MS || 1500,
+);
 
 function resolveNestLoggerLevels(): LogLevel[] {
-  const level = String(process.env.LOG_LEVEL || 'log').trim().toLowerCase();
+  const level = String(process.env.LOG_LEVEL || 'log')
+    .trim()
+    .toLowerCase();
   switch (level) {
     case 'debug':
       return ['log', 'warn', 'error', 'debug'];
@@ -36,12 +51,6 @@ function resolveNestLoggerLevels(): LogLevel[] {
   }
 }
 
-function isAddrInUseError(value: unknown): value is { code: string; message?: string } {
-  if (!value || typeof value !== 'object') return false;
-  const code = (value as { code?: unknown }).code;
-  return typeof code === 'string' && code === 'EADDRINUSE';
-}
-
 function installRecoverableErrorGuards(): void {
   const guardGlobal = globalThis as typeof globalThis & {
     [PROVIDER_ERROR_GUARD]?: boolean;
@@ -50,145 +59,24 @@ function installRecoverableErrorGuards(): void {
   guardGlobal[PROVIDER_ERROR_GUARD] = true;
 
   process.on('uncaughtException', (error: unknown) => {
-    if (isAddrInUseError(error)) {
-      console.warn(
-        '[Provider bootstrap] Suppressed uncaught EADDRINUSE (port recovery will retry).',
-      );
-      return;
-    }
-    console.error('[Provider bootstrap] Uncaught exception (runtime continues):', error);
+    console.error(
+      '[Provider bootstrap] Uncaught exception (runtime continues):',
+      error,
+    );
   });
 
   process.on('unhandledRejection', (reason: unknown) => {
-    if (isAddrInUseError(reason)) {
-      console.warn(
-        '[Provider bootstrap] Suppressed unhandled EADDRINUSE rejection (port recovery will retry).',
-      );
-      return;
-    }
-    console.error('[Provider bootstrap] Unhandled rejection (runtime continues):', reason);
+    console.error(
+      '[Provider bootstrap] Unhandled rejection (runtime continues):',
+      reason,
+    );
   });
-}
 
-function releasePortListenersWindows(port: number): number[] {
-  if (process.platform !== 'win32') return [];
-
-  try {
-    const output = execSync(`netstat -ano -p tcp | findstr :${port}`, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      encoding: 'utf8',
-    });
-    const lines = String(output)
-      .split(/\r?\n/)
-      .map(line => line.trim())
-      .filter(Boolean);
-
-    const pids = new Set<number>();
-    for (const line of lines) {
-      if (!line.includes('LISTENING')) continue;
-      const parts = line.split(/\s+/);
-      const pidRaw = parts[parts.length - 1];
-      const pid = Number(pidRaw);
-      if (!Number.isFinite(pid) || pid <= 0) continue;
-      if (pid === process.pid) continue;
-      pids.add(pid);
-    }
-
-    for (const pid of pids) {
-      try {
-        execSync(`taskkill /PID ${pid} /F`, {
-          stdio: ['ignore', 'ignore', 'ignore'],
-        });
-      } catch {
-        // Ignore races where the process exits between netstat and taskkill.
-      }
-    }
-
-    return Array.from(pids);
-  } catch {
-    return [];
-  }
-}
-
-function getPortListenersWindows(port: number): number[] {
-  if (process.platform !== 'win32') return [];
-  try {
-    const output = execSync(`netstat -ano -p tcp | findstr :${port}`, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      encoding: 'utf8',
-    });
-    const lines = String(output)
-      .split(/\r?\n/)
-      .map(line => line.trim())
-      .filter(Boolean);
-
-    const pids = new Set<number>();
-    for (const line of lines) {
-      if (!line.includes('LISTENING')) continue;
-      const parts = line.split(/\s+/);
-      const pidRaw = parts[parts.length - 1];
-      const pid = Number(pidRaw);
-      if (!Number.isFinite(pid) || pid <= 0) continue;
-      if (pid === process.pid) continue;
-      pids.add(pid);
-    }
-    return Array.from(pids);
-  } catch {
-    return [];
-  }
-}
-
-async function ensurePortFreeDev(port: number): Promise<void> {
-  const timeoutMs = 15_000;
-  const stepMs = 400;
-  const startedAt = Date.now();
-
-  while (Date.now() - startedAt < timeoutMs) {
-    const listeners = getPortListenersWindows(port);
-    if (listeners.length === 0) return;
-
-    const killed = releasePortListenersWindows(port);
-    if (killed.length > 0) {
-      console.warn(
-        `[Provider bootstrap] Freed port ${port} by stopping PID(s): ${killed.join(', ')}`,
-      );
-    }
-
-    await new Promise(resolveDelay => setTimeout(resolveDelay, stepMs));
-  }
-}
-
-async function listenWithPortRecovery(
-  app: Awaited<ReturnType<typeof NestFactory.create>>,
-  port: number,
-): Promise<void> {
-  const host = '0.0.0.0';
-  const isDev = process.env.NODE_ENV !== 'production';
-  const maxAttempts = isDev ? 5 : 1;
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    try {
-      await app.listen(port, host);
-      return;
-    } catch (err: any) {
-      if (err?.code !== 'EADDRINUSE') {
-        throw err;
-      }
-
-      const isLastAttempt = attempt >= maxAttempts;
-      if (!isDev || isLastAttempt) {
-        throw new Error(
-          `Port ${port} is already in use after ${attempt} attempt(s). Stop conflicting process or free the port.`,
-        );
-      }
-
-      console.warn(
-        `[Provider bootstrap] Port ${port} busy on attempt ${attempt}/${maxAttempts}; trying to free and retry...`,
-      );
-      await ensurePortFreeDev(port);
-      await new Promise(resolveDelay => setTimeout(resolveDelay, 250));
-    }
-  }
+  process.on('exit', (code: number | null, signal: NodeJS.Signals | null) => {
+    process.stderr.write(
+      `[Provider bootstrap] process.exit code=${code} signal=${signal}\n`,
+    );
+  });
 }
 
 // 👇 Сначала база .env, затем .env.{APP_MODE} (переменные из второго перезаписывают)
@@ -197,8 +85,18 @@ dotenv.config({
   path: resolve(process.cwd(), `.env.${process.env.APP_MODE || 'local'}`),
 });
 
+const PROVIDER_STARTUP_GRACE_MS = Number(
+  process.env.PROVIDER_STARTUP_GRACE_MS || 10_000,
+);
+
 async function bootstrap() {
+  console.log(`[Provider] PID=${process.pid} starting`);
+  /** Grace period for signals starts from this time; set to now when server is ready (after self-checks). */
+  const readyTimeRef = { value: Date.now() };
   installRecoverableErrorGuards();
+
+  const PORT = Number(process.env.PROVIDER_API_PORT || 8081);
+  const host = '0.0.0.0';
 
   // 👇 Опции для HTTPS (если заданы SSL_CERT и SSL_KEY в .env)
   let httpsOptions: { key: Buffer; cert: Buffer } | undefined;
@@ -227,13 +125,15 @@ async function bootstrap() {
     exclude: [
       { path: 'health/live', method: RequestMethod.GET },
       { path: 'health/ready', method: RequestMethod.GET },
+      { path: 'health/runtime', method: RequestMethod.GET },
+      { path: 'provider/runtime/ws', method: RequestMethod.GET },
     ],
   });
   app.useGlobalPipes(new ValidationPipe());
 
   // 👇 Читаем CORS_ORIGINS из env
   const origins = process.env.CORS_ORIGINS
-    ? process.env.CORS_ORIGINS.split(',').map(o => o.trim())
+    ? process.env.CORS_ORIGINS.split(',').map((o) => o.trim())
     : ['*'];
 
   app.enableCors({
@@ -247,43 +147,99 @@ async function bootstrap() {
     cors: { origin: origins, credentials: true },
   });
 
+  const bootstrapLogger = new Logger('Provider');
+  const configService = app.get(ConfigService);
+  const providerConfig = configService.getConfig()?.provider as
+    | { allowAnonymousInDev?: boolean }
+    | undefined;
+  const allowAnonymousInDev =
+    providerConfig?.allowAnonymousInDev === true ||
+    process.env.PROVIDER_ALLOW_ANONYMOUS_IN_DEV === 'true';
+  const isDev = process.env.NODE_ENV !== 'production';
+  if (isDev && allowAnonymousInDev) {
+    bootstrapLogger.warn(
+      '⚠️ Provider API allows anonymous requests in DEV mode',
+    );
+  }
+
   // 👇 Swagger
   const config = new DocumentBuilder()
-    .setTitle('Barfinex.com Provider API')
+    .setTitle('Barfinex Provider API')
     .setDescription(
-      'This allows seamless interaction with multiple trading platforms through connectors. ' +
-      'It offers methods for authentication, market data retrieval, order placement and cancellation, ' +
-      'portfolio management, notifications, and account management. This API streamlines ' +
-      'the development and integration of trading strategies and applications. ' +
-      'Security: all /api/* endpoints require provider API token from config.provider.apiToken. ' +
-      'Send it as Authorization: Bearer <token> or x-api-token header.',
+      'Unified API for the Barfinex Provider: connectors, market data, candles, orders, detectors, inspectors, ' +
+        'and proxy endpoints to Advisor/Detector/Inspector services. ' +
+        '**Security:** All `/api/*` endpoints require a Provider API token (from `config.provider.apiToken`). ' +
+        'Send as **Authorization: Bearer &lt;token&gt;** or **x-api-token** header. Health and metrics endpoints at ' +
+        '`/health/*` and `/metrics` do not require authentication.',
     )
     .setVersion('1.0')
-    .addTag('Connectors', 'Retrieve available market data providers...')
-    .addTag('Detectors', 'Advanced algorithms for identifying market patterns...')
-    .addTag('Inspectors', 'Risk management services in a trading system...')
-    .addTag('Accounts', 'Get user account information...')
-    .addTag('Orders', 'Place new buy/sell orders...')
-    .addTag('Candles', 'Obtain historical candlestick data...')
-    .addTag('Products', 'Access information about available trading products...')
-    .addTag('Subscriptions', 'Subscribe to notifications about market events...')
-    .addTag('Assets', 'Retrieve information about available assets...')
+    .addTag('Connectors', 'Market data provider connectors and configuration')
+    .addTag(
+      'Detectors',
+      'Detector CRUD, symbols, indicators, capital efficiency',
+    )
+    .addTag('Inspectors', 'Inspector CRUD and risk management')
+    .addTag('Accounts', 'Account info and leverage')
+    .addTag('Orders', 'Place, update, close, and list orders')
+    .addTag('Candles', 'Historical OHLCV candles and candle integrity debug')
+    .addTag('Symbols', 'Trading symbols by connector and market')
+    .addTag('MarketData', 'Trades, orderbook, and market data from QuestDB')
+    .addTag(
+      'Runtime',
+      'Provider instance identity, ownership, shards, ingestion metrics',
+    )
+    .addTag(
+      'AdvisorProxy',
+      'Proxy to Advisor service (analytics, telemetry, health)',
+    )
+    .addTag(
+      'DetectorProxy',
+      'Proxy to Detector service (health, risk, metrics)',
+    )
+    .addTag('InspectorProxy', 'Proxy to Inspector service')
+    .addTag(
+      'ProviderGateway',
+      'Gateway: strategies, detector/inspector proxy, system health',
+    )
+    .addTag('AppRegistry', 'App registration, heartbeat, unregister')
+    .addTag('Signals', 'Signal context for a symbol')
+    .addTag('Dashboard', 'Operational dashboard overview')
+    .addTag(
+      'Proxy',
+      'Generic proxy to advisors/inspectors/detectors by app key',
+    )
+    .addTag('Subscriptions', 'Subscribe to market events')
+    .addTag('Assets', 'Available assets')
     .addBearerAuth(
       {
         type: 'http',
         scheme: 'bearer',
         bearerFormat: 'API Token',
-        name: 'ProviderApiToken',
+        name: 'Authorization',
         description:
-          'Required for all /api/* endpoints. Use Authorization: Bearer <token> (same as config.provider.apiToken).',
+          'Provider API token. Use: Authorization: Bearer <token> (same as config.provider.apiToken).',
         in: 'header',
       },
       'ProviderApiToken',
     )
+    .addApiKey(
+      {
+        type: 'apiKey',
+        name: 'x-api-token',
+        in: 'header',
+        description:
+          'Alternative to Bearer: send Provider API token in x-api-token header.',
+      },
+      'x-api-token',
+    )
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('docs', app, document);
+  SwaggerModule.setup('api/docs', app, document);
+
+  const SHUTDOWN_CLOSE_MS = Number(
+    process.env.PROVIDER_SHUTDOWN_TIMEOUT_MS || 5000,
+  );
 
   let shuttingDown = false;
   const closeApp = async (
@@ -292,34 +248,45 @@ async function bootstrap() {
   ) => {
     if (shuttingDown) return;
     shuttingDown = true;
-    try {
-      await app.close();
-    } catch {
-      // no-op: process is shutting down anyway
-    } finally {
-      // On Windows, re-emitting SIGUSR2 is unreliable and can make nodemon
-      // report "app crashed" even for graceful restarts.
-      if (options?.reemitSignal && process.platform !== 'win32') {
-        try {
-          process.kill(process.pid, signal);
-          return;
-        } catch (error) {
+    console.log(`[Provider] PID=${process.pid} shutting down`);
+    await Promise.race([
+      app.close(),
+      new Promise<void>((resolve) => {
+        setTimeout(() => {
           console.warn(
-            `[Provider bootstrap] Failed to re-emit ${signal}; falling back to clean exit: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
+            `[Provider bootstrap] Shutdown timeout after ${SHUTDOWN_CLOSE_MS}ms, exiting.`,
           );
-        }
+          resolve();
+        }, SHUTDOWN_CLOSE_MS);
+      }),
+    ]);
+    // On Windows, re-emitting SIGUSR2 is unreliable and can make nodemon
+    // report "app crashed" even for graceful restarts.
+    if (options?.reemitSignal && process.platform !== 'win32') {
+      try {
+        process.kill(process.pid, signal);
+        return;
+      } catch (error) {
+        console.warn(
+          `[Provider bootstrap] Failed to re-emit ${signal}; falling back to clean exit: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
       }
-      if (typeof options?.exitCode === 'number') {
-        process.exit(options.exitCode);
-      }
+    }
+    if (typeof options?.exitCode === 'number') {
+      process.exit(options.exitCode);
+    }
+    // On Windows nodemon may use SIGUSR2; we don't re-emit, so exit explicitly for clean restart.
+    if (signal === 'SIGUSR2') {
+      process.exit(0);
     }
   };
 
-  // Nodemon uses SIGUSR2 during restarts; close HTTP server first to avoid EADDRINUSE.
+  // Nodemon uses SIGUSR2 (Unix) or SIGINT (Windows) during restarts.
+  // Accept SIGINT/SIGTERM so Nest runs graceful shutdown (onModuleDestroy, app.close()).
   process.once('SIGUSR2', () => {
-    void closeApp('SIGUSR2', { reemitSignal: true }).catch(error => {
+    void closeApp('SIGUSR2', { reemitSignal: true }).catch((error) => {
       console.warn(
         `[Provider bootstrap] SIGUSR2 shutdown handler failed: ${
           error instanceof Error ? error.message : String(error)
@@ -327,39 +294,166 @@ async function bootstrap() {
       );
     });
   });
-  process.once('SIGINT', () => {
-    void closeApp('SIGINT', { exitCode: 0 }).catch(error => {
+  const sigintHandler = async () => {
+    const elapsed = Date.now() - readyTimeRef.value;
+    const inGracePeriod = elapsed < PROVIDER_STARTUP_GRACE_MS;
+    if (inGracePeriod) {
+      console.warn(
+        `[Provider bootstrap] SIGINT ignored (grace period): ${elapsed}ms < ${PROVIDER_STARTUP_GRACE_MS}ms`,
+      );
+      return;
+    }
+    process.removeListener('SIGINT', sigintHandler);
+    try {
+      await closeApp('SIGINT', { exitCode: 0 });
+    } catch (error) {
       console.warn(
         `[Provider bootstrap] SIGINT shutdown handler failed: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
       process.exit(1);
-    });
-  });
-  process.once('SIGTERM', () => {
-    void closeApp('SIGTERM', { exitCode: 0 }).catch(error => {
+    }
+  };
+  process.on('SIGINT', sigintHandler);
+  const sigtermHandler = async () => {
+    const elapsed = Date.now() - readyTimeRef.value;
+    const inGracePeriod = elapsed < PROVIDER_STARTUP_GRACE_MS;
+    if (inGracePeriod) {
+      console.warn(
+        `[Provider bootstrap] SIGTERM ignored (grace period): ${elapsed}ms < ${PROVIDER_STARTUP_GRACE_MS}ms`,
+      );
+      return;
+    }
+    process.removeListener('SIGTERM', sigtermHandler);
+    try {
+      await closeApp('SIGTERM', { exitCode: 0 });
+    } catch (error) {
       console.warn(
         `[Provider bootstrap] SIGTERM shutdown handler failed: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
       process.exit(1);
-    });
-  });
+    }
+  };
+  process.on('SIGTERM', sigtermHandler);
 
-  const PORT = Number(process.env.PROVIDER_API_PORT || 8081);
-  const isDev = process.env.NODE_ENV !== 'production';
-  if (isDev) {
-    await ensurePortFreeDev(PORT);
-  }
+  // Nest runs onModuleInit/onApplicationBootstrap inside listen(). If Redis/QuestDB/Connector
+  // init throws here, listen() rejects and no port is bound (ERR_CONNECTION_REFUSED from Studio).
+  console.log(`[Provider bootstrap] Binding HTTP server to ${host}:${PORT}...`);
+  await app.listen(PORT, host);
+  console.log(`[Provider bootstrap] listen() resolved, running self-checks`);
 
-  await listenWithPortRecovery(app, PORT);
+  app.get(ProviderBootstrapService).markHttpStarted();
 
   const proto = httpsOptions ? 'https' : 'http';
-  console.log(`🚀 Provider API is running on: ${proto}://localhost:${PORT}/api`);
-  console.log(`📑 Documentation: ${proto}://localhost:${PORT}/docs`);
-  console.log(`🔌 WebSocket (Socket.IO) at: ${proto}://localhost:${PORT}/ws`);
+  const baseUrl = `${proto}://localhost:${PORT}`;
+  process.stderr.write(`[Provider bootstrap] 🚀 API listening on ${baseUrl}\n`);
+  console.log(`[Provider bootstrap] 🚀 API listening on ${baseUrl}`);
+  console.log(
+    `   Health (no prefix): ${baseUrl}/health/live  and  ${baseUrl}/health/ready`,
+  );
+  console.log(`   API base: ${baseUrl}/api`);
+  console.log(`   Swagger docs: ${baseUrl}/api/docs`);
+  const wsScheme = httpsOptions ? 'wss' : 'ws';
+  const wsEndpoint = `${wsScheme}://localhost:${PORT}/ws`;
+  console.log(
+    `   [Provider WS] WebSocket endpoint available at: ${wsEndpoint}`,
+  );
+  console.log(`   WebSocket (Socket.IO): ${baseUrl}/ws`);
+
+  // Verify server is reachable (helps diagnose ECONNREFUSED when MCP/Studio cannot connect).
+  try {
+    const http = await import('http');
+    const https = await import('https');
+    const healthUrl = `${baseUrl}/health/live`;
+    const client = proto === 'https' ? https : http;
+    await new Promise<void>((resolve, reject) => {
+      const req = client.get(
+        healthUrl,
+        { rejectUnauthorized: false },
+        (res) => {
+          if (res.statusCode && res.statusCode >= 200 && res.statusCode < 400) {
+            console.log(
+              `[Provider bootstrap] Self-check OK: ${healthUrl} -> ${res.statusCode}`,
+            );
+          } else {
+            console.warn(
+              `[Provider bootstrap] Self-check unexpected: ${healthUrl} -> ${res.statusCode}`,
+            );
+          }
+          res.resume();
+          resolve();
+        },
+      );
+      req.on('error', reject);
+      req.setTimeout(3000, () => {
+        req.destroy();
+        reject(new Error('Self-check timeout'));
+      });
+    });
+  } catch (e: any) {
+    console.warn(
+      `[Provider bootstrap] Self-check failed (server may still be usable): ${
+        e?.message || e
+      }`,
+    );
+  }
+
+  // Optional: verify WebSocket endpoint info route is reachable.
+  try {
+    const wsInfoUrl = `${baseUrl}/provider/runtime/ws`;
+    const http = await import('http');
+    const https = await import('https');
+    const client = proto === 'https' ? https : http;
+    await new Promise<void>((resolve, reject) => {
+      const req = client.get(
+        wsInfoUrl,
+        { rejectUnauthorized: false },
+        (res) => {
+          let body = '';
+          res.on('data', (chunk: Buffer) => {
+            body += chunk.toString();
+          });
+          res.on('end', () => {
+            if (res.statusCode === 200) {
+              try {
+                const data = JSON.parse(body);
+                if (data?.websocket === 'available' && data?.endpoint) {
+                  console.log(
+                    `[Provider bootstrap] WS endpoint self-check OK: ${data.endpoint}`,
+                  );
+                }
+              } catch {
+                // ignore parse
+              }
+            } else {
+              console.warn(
+                `[Provider bootstrap] WS endpoint self-check unexpected: ${wsInfoUrl} -> ${res.statusCode}`,
+              );
+            }
+            resolve();
+          });
+          res.resume();
+        },
+      );
+      req.on('error', reject);
+      req.setTimeout(3000, () => {
+        req.destroy();
+        reject(new Error('WS self-check timeout'));
+      });
+    });
+  } catch (e: any) {
+    console.warn(
+      `[Provider bootstrap] WS endpoint self-check failed (WS may still work): ${
+        e?.message || e
+      }`,
+    );
+  }
+
+  console.log(`[Provider bootstrap] self-checks done, setting readyTimeRef`);
+  readyTimeRef.value = Date.now();
 }
 const globalWithBootstrapGuard = globalThis as typeof globalThis & {
   [PROVIDER_BOOTSTRAP_GUARD]?: boolean;
@@ -367,9 +461,22 @@ const globalWithBootstrapGuard = globalThis as typeof globalThis & {
 let bootstrapRetryAttempt = 0;
 let bootstrapRetryTimer: ReturnType<typeof setTimeout> | null = null;
 
-/** Treat infrastructure connection errors as retriable (do not treat as permanent failure). */
+function isEaddrInUseError(error: unknown): boolean {
+  const msg = (
+    error instanceof Error ? error.message : String(error)
+  ).toLowerCase();
+  return (
+    msg.includes('eaddrinuse') ||
+    (error as NodeJS.ErrnoException)?.code === 'EADDRINUSE'
+  );
+}
+
+/** Treat infrastructure connection errors as retriable. EADDRINUSE is retried separately (see EADDRINUSE_RETRY_*). */
 function isRetriableBootstrapError(error: unknown): boolean {
-  const msg = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  if (isEaddrInUseError(error)) return false;
+  const msg = (
+    error instanceof Error ? error.message : String(error)
+  ).toLowerCase();
   return (
     msg.includes('econnreset') ||
     msg.includes('econnrefused') ||
@@ -381,22 +488,55 @@ function isRetriableBootstrapError(error: unknown): boolean {
 }
 
 function scheduleBootstrapRetry(error: unknown): void {
-  const message = error instanceof Error ? error.stack || error.message : String(error);
+  const message =
+    error instanceof Error ? error.stack || error.message : String(error);
+  bootstrapRetryAttempt += 1;
+
+  const isPortInUse = isEaddrInUseError(error);
+  if (isPortInUse && bootstrapRetryAttempt <= EADDRINUSE_RETRY_ATTEMPTS) {
+    console.warn(
+      `[Provider bootstrap] Port in use (EADDRINUSE), attempt ${bootstrapRetryAttempt}/${EADDRINUSE_RETRY_ATTEMPTS}. Retrying in ${EADDRINUSE_RETRY_DELAY_MS}ms (previous process may still be closing).`,
+    );
+    if (bootstrapRetryTimer) return;
+    bootstrapRetryTimer = setTimeout(() => {
+      bootstrapRetryTimer = null;
+      void bootstrap()
+        .then(() => {
+          bootstrapRetryAttempt = 0;
+        })
+        .catch(scheduleBootstrapRetry);
+    }, EADDRINUSE_RETRY_DELAY_MS);
+    return;
+  }
+
+  if (isPortInUse) {
+    console.error(
+      `[Provider bootstrap] Port still in use after ${EADDRINUSE_RETRY_ATTEMPTS} attempts. Exiting.`,
+    );
+    process.exit(1);
+    return;
+  }
+
   const retriable = isRetriableBootstrapError(error);
   const delayMs = Math.min(
-    PROVIDER_BOOTSTRAP_RETRY_BASE_MS * Math.pow(2, Math.min(bootstrapRetryAttempt, 8)),
+    PROVIDER_BOOTSTRAP_RETRY_BASE_MS *
+      Math.pow(2, Math.min(bootstrapRetryAttempt, 8)),
     PROVIDER_BOOTSTRAP_RETRY_MAX_MS,
   );
-  bootstrapRetryAttempt += 1;
 
   console.error(
     `[Provider bootstrap] Fatal startup error (attempt=${bootstrapRetryAttempt}): ${message}`,
   );
-  if (retriable) {
-    console.warn(
-      '[Provider bootstrap] Infrastructure connection error (QuestDB/Redis). Retrying is expected until services are up.',
+  if (!retriable) {
+    console.error(
+      '[Provider bootstrap] Non-retriable error. Exiting; nodemon will restart if applicable.',
     );
+    process.exit(1);
+    return;
   }
+  console.warn(
+    '[Provider bootstrap] Infrastructure connection error (QuestDB/Redis/Connector). Server did not bind to port — app.listen() failed during module init. Retrying until services are up.',
+  );
   if (bootstrapRetryTimer) return;
 
   console.warn(

@@ -20,9 +20,16 @@ export class BinanceRedisService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(BinanceRedisService.name);
   private readonly debugEnabled = process.env.EVENTBUS_DEBUG === 'true';
   private readonly eventSource = process.env.SERVICE_NAME || 'provider';
-  private readonly emitQueueMaxSize = 1_000;
+  private readonly emitQueueMaxSize = Math.max(
+    1_000,
+    Number(process.env.REDIS_EMIT_QUEUE_MAX_SIZE || 5_000),
+  );
   private readonly emitQueue: QueuedEmitEvent[] = [];
-  private readonly disconnectedLatestByPattern = new Map<SubscriptionType, Record<string, unknown>>();
+  private readonly disconnectedLatestByPattern = new Map<
+    SubscriptionType,
+    Record<string, unknown>
+  >();
+  private static readonly DISCONNECTED_BUFFER_MAX_PATTERNS = 100;
   private readonly healthIntervalMs = 10_000;
   private readonly emitErrorCooldownMs = Math.max(
     250,
@@ -72,25 +79,42 @@ export class BinanceRedisService implements OnModuleInit, OnModuleDestroy {
     this.startFlushLoop();
   }
 
-  emit<TPayload extends object>(pattern: SubscriptionType, data: TPayload): void {
+  emit<TPayload extends object>(
+    pattern: SubscriptionType,
+    data: TPayload,
+  ): void {
     if (!this.isEmitToRedisEnabled) return;
     const payload = {
       ...data,
       metadata: this.normalizeEventMetadata(
-        (data as { metadata?: EventMessageByType<SubscriptionType>['metadata'] }).metadata,
+        (
+          data as {
+            metadata?: EventMessageByType<SubscriptionType>['metadata'];
+          }
+        ).metadata,
       ),
     };
     const now = Date.now();
     const emitSuspended = now < this.emitSuspendedUntil;
     if (emitSuspended) {
       this.publishErrorsTotal.inc();
-      if (now - this.lastEmitDisconnectedWarnAt >= this.emitDisconnectedWarnThrottleMs) {
+      if (
+        now - this.lastEmitDisconnectedWarnAt >=
+        this.emitDisconnectedWarnThrottleMs
+      ) {
         this.lastEmitDisconnectedWarnAt = now;
         this.logger.warn(
-          `[RedisEmitSkip] pattern=${String(pattern)} suspended=true buffered_patterns=${this.disconnectedLatestByPattern.size}`,
+          `[RedisEmitSkip] pattern=${String(
+            pattern,
+          )} suspended=true buffered_patterns=${
+            this.disconnectedLatestByPattern.size
+          }`,
         );
       }
-      this.bufferDisconnectedEmitEvent(pattern, payload as Record<string, unknown>);
+      this.bufferDisconnectedEmitEvent(
+        pattern,
+        payload as Record<string, unknown>,
+      );
       return;
     }
     this.enqueueEmitEvent(pattern, payload as Record<string, unknown>);
@@ -119,7 +143,9 @@ export class BinanceRedisService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  private normalizeEventMetadata(metadata?: EventMessageByType<SubscriptionType>['metadata']) {
+  private normalizeEventMetadata(
+    metadata?: EventMessageByType<SubscriptionType>['metadata'],
+  ) {
     const eventId = metadata?.eventId ?? randomUUID();
     return {
       eventId,
@@ -130,7 +156,10 @@ export class BinanceRedisService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  private enqueueEmitEvent(pattern: SubscriptionType, payload: Record<string, unknown>): void {
+  private enqueueEmitEvent(
+    pattern: SubscriptionType,
+    payload: Record<string, unknown>,
+  ): void {
     this.emitQueue.push({ pattern, payload });
     this.updateRedisQueueMetrics();
     if (this.emitQueue.length <= this.emitQueueMaxSize) return;
@@ -144,9 +173,21 @@ export class BinanceRedisService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  private bufferDisconnectedEmitEvent(pattern: SubscriptionType, payload: Record<string, unknown>): void {
+  private bufferDisconnectedEmitEvent(
+    pattern: SubscriptionType,
+    payload: Record<string, unknown>,
+  ): void {
     if (this.disconnectedLatestByPattern.has(pattern)) {
       this.disconnectedBufferOverwriteCount += 1;
+    }
+    if (
+      !this.disconnectedLatestByPattern.has(pattern) &&
+      this.disconnectedLatestByPattern.size >=
+        BinanceRedisService.DISCONNECTED_BUFFER_MAX_PATTERNS
+    ) {
+      const oldestKey = this.disconnectedLatestByPattern.keys().next().value;
+      if (oldestKey !== undefined)
+        this.disconnectedLatestByPattern.delete(oldestKey);
     }
     this.disconnectedLatestByPattern.set(pattern, payload);
     this.updateRedisQueueMetrics();
@@ -154,12 +195,17 @@ export class BinanceRedisService implements OnModuleInit, OnModuleDestroy {
 
   private drainDisconnectedBufferToQueue(): void {
     if (this.disconnectedLatestByPattern.size === 0) return;
-    for (const [pattern, payload] of this.disconnectedLatestByPattern.entries()) {
+    for (const [
+      pattern,
+      payload,
+    ] of this.disconnectedLatestByPattern.entries()) {
       this.enqueueEmitEvent(pattern, payload);
     }
     this.disconnectedLatestByPattern.clear();
     this.updateRedisQueueMetrics();
   }
+
+  private static readonly FLUSH_BATCH_SIZE = 50;
 
   private async flushQueuedEvents(): Promise<void> {
     if (this.flushInFlight) return;
@@ -169,9 +215,13 @@ export class BinanceRedisService implements OnModuleInit, OnModuleDestroy {
 
     try {
       while (this.emitQueue.length > 0) {
-        const next = this.emitQueue.shift();
-        if (!next) continue;
-        await this.publishSingle(next.pattern, next.payload);
+        const batch = this.emitQueue.splice(
+          0,
+          BinanceRedisService.FLUSH_BATCH_SIZE,
+        );
+        await Promise.all(
+          batch.map((evt) => this.publishSingle(evt.pattern, evt.payload)),
+        );
       }
     } finally {
       this.updateRedisQueueMetrics();
@@ -191,9 +241,14 @@ export class BinanceRedisService implements OnModuleInit, OnModuleDestroy {
       this.consumerLagMs.observe(consumerLagMs);
     }
 
-    if (this.debugEnabled && Date.now() - this.lastEmitLogAt >= this.emitLogThrottleMs) {
+    if (
+      this.debugEnabled &&
+      Date.now() - this.lastEmitLogAt >= this.emitLogThrottleMs
+    ) {
       this.lastEmitLogAt = Date.now();
-      this.logger.debug(`[RedisEmit] pattern=${String(pattern)} trace=${traceId ?? 'n/a'}`);
+      this.logger.debug(
+        `[RedisEmit] pattern=${String(pattern)} trace=${traceId ?? 'n/a'}`,
+      );
     }
 
     try {
@@ -240,13 +295,19 @@ export class BinanceRedisService implements OnModuleInit, OnModuleDestroy {
   }
 
   private extractTraceId(data: unknown): string | undefined {
-    const maybeMetadata = (data as { metadata?: { traceId?: unknown } } | undefined)?.metadata;
+    const maybeMetadata = (
+      data as { metadata?: { traceId?: unknown } } | undefined
+    )?.metadata;
     const traceId = maybeMetadata?.traceId;
-    return typeof traceId === 'string' && traceId.length > 0 ? traceId : undefined;
+    return typeof traceId === 'string' && traceId.length > 0
+      ? traceId
+      : undefined;
   }
 
   private getOrCreatePublishErrorsCounter(): Counter<string> {
-    const existing = register.getSingleMetric('provider_redis_publish_errors_total');
+    const existing = register.getSingleMetric(
+      'provider_redis_publish_errors_total',
+    );
     if (existing) return existing as Counter<string>;
     return new Counter({
       name: 'provider_redis_publish_errors_total',
@@ -256,7 +317,9 @@ export class BinanceRedisService implements OnModuleInit, OnModuleDestroy {
   }
 
   private getOrCreatePublishLatencyHistogram(): Histogram<string> {
-    const existing = register.getSingleMetric('provider_redis_publish_latency_ms');
+    const existing = register.getSingleMetric(
+      'provider_redis_publish_latency_ms',
+    );
     if (existing) return existing as Histogram<string>;
     return new Histogram({
       name: 'provider_redis_publish_latency_ms',
@@ -288,12 +351,18 @@ export class BinanceRedisService implements OnModuleInit, OnModuleDestroy {
   }
 
   private updateRedisQueueMetrics(): void {
-    this.emitQueueSizeGauge.set(this.emitQueue.length + this.disconnectedLatestByPattern.size);
+    this.emitQueueSizeGauge.set(
+      this.emitQueue.length + this.disconnectedLatestByPattern.size,
+    );
   }
 
-  private extractConsumerLagMs(payload: Record<string, unknown>): number | null {
-    const optionsMoment = (payload as { options?: { updateMoment?: unknown } }).options?.updateMoment;
-    const metadataMoment = (payload as { metadata?: { timestamp?: unknown } }).metadata?.timestamp;
+  private extractConsumerLagMs(
+    payload: Record<string, unknown>,
+  ): number | null {
+    const optionsMoment = (payload as { options?: { updateMoment?: unknown } })
+      .options?.updateMoment;
+    const metadataMoment = (payload as { metadata?: { timestamp?: unknown } })
+      .metadata?.timestamp;
     const sourceTimestamp = Number(optionsMoment ?? metadataMoment);
     if (!Number.isFinite(sourceTimestamp) || sourceTimestamp <= 0) return null;
     const lag = Date.now() - sourceTimestamp;

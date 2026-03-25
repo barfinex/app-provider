@@ -1,10 +1,36 @@
-import { All, Body, Controller, Get, Logger, Query, Req, Res } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
+import {
+  Body,
+  Controller,
+  Get,
+  Logger,
+  Post,
+  Query,
+  Req,
+  Res,
+} from '@nestjs/common';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiBearerAuth,
+  ApiSecurity,
+  ApiQuery,
+  ApiBody,
+  ApiOkResponse,
+} from '@nestjs/swagger';
 import { Request, Response } from 'express';
 import { createHash } from 'crypto';
 import { DetectorProxyService } from './detector-proxy.service';
+import { ClosePositionRequestDto } from '../advisor-proxy/advisor-proxy.dto';
 
+/**
+ * DetectorProxy — explicit routes for all Detector endpoints.
+ *
+ * Every route is declared with full OpenAPI metadata so that
+ * the Provider Swagger spec exposes detector capabilities to Studio and MCP.
+ */
 @ApiTags('DetectorProxy')
+@ApiBearerAuth('ProviderApiToken')
+@ApiSecurity('x-api-token')
 @Controller('detector-proxy')
 export class DetectorProxyController {
   private readonly logger = new Logger(DetectorProxyController.name);
@@ -16,7 +42,15 @@ export class DetectorProxyController {
 
   constructor(private readonly detectorProxyService: DetectorProxyService) {}
 
+  // ────────────────────── Health ──────────────────────
+
   @Get('health')
+  @ApiOperation({
+    summary: 'Detector reachability check',
+    description:
+      'Probes the Detector service. Returns { detectorReachable: true } if Detector responds with 200.',
+  })
+  @ApiOkResponse({ description: '{ detectorReachable: boolean }' })
   async health(@Req() req: Request, @Res() res: Response) {
     const result = await this.detectorProxyService.get(
       'health',
@@ -28,82 +62,188 @@ export class DetectorProxyController {
     });
   }
 
-  @All('detector/*')
-  async proxyDetectorEndpoint(
+  // ────────────────────── Risk ──────────────────────
+
+  @Post('risk/close-position')
+  @ApiOperation({
+    summary: 'Close a position via Detector risk module',
+    description:
+      'Sends a close-position command to the Detector risk module. ' +
+      'Requires symbol, connectorType, marketType, and reason. ' +
+      'Side and quantity are optional (defaults to closing the full position). ' +
+      'Returns 403 if Detector is in DETECTOR_READONLY mode.',
+  })
+  @ApiBody({ type: ClosePositionRequestDto })
+  @ApiOkResponse({
+    description:
+      '{ success, message?, orderId?, symbol?, side?, closedQuantity? }',
+  })
+  async riskClosePosition(
     @Req() req: Request,
-    @Res() res: Response,
-    @Query() query: Record<string, unknown>,
     @Body() body: Record<string, unknown>,
+    @Res() res: Response,
   ) {
-    const wildcardPath = (req.params?.[0] as string | undefined) || '';
-    const endpoint = wildcardPath.replace(/^\/+/, '');
-    const method = String(req.method || 'GET').toUpperCase();
     const result = await this.detectorProxyService.request(
-      method,
-      endpoint,
-      query,
+      'POST',
+      'risk/close-position',
+      undefined,
       body,
       req.headers as Record<string, unknown>,
     );
     return res.status(result.status).send(result.data);
   }
 
-  @All('risk/*')
-  async proxyRiskEndpoint(
-    @Req() req: Request,
-    @Res() res: Response,
-    @Query() query: Record<string, unknown>,
-    @Body() body: Record<string, unknown>,
-  ) {
-    const wildcardPath = (req.params?.[0] as string | undefined) || '';
-    const endpoint = `risk/${wildcardPath.replace(/^\/+/, '')}`.replace(/\/+$/, '');
-    const method = String(req.method || 'GET').toUpperCase();
-    if (!this.isAllowedRiskProxy(method, endpoint)) {
-      this.logDeniedRiskMutation(req, endpoint, method);
-      return res.status(403).json({
-        error: 'risk endpoint mutation not allowed via proxy',
-      });
-    }
+  @Get('risk/health')
+  @ApiOperation({
+    summary: 'Detector risk health (read-only)',
+    description:
+      'Returns risk module health status. Read-only access via proxy.',
+  })
+  async riskHealth(@Req() req: Request, @Res() res: Response) {
     const result = await this.detectorProxyService.request(
-      method,
-      endpoint,
-      query,
-      body,
+      'GET',
+      'risk/health',
+      undefined,
+      undefined,
       req.headers as Record<string, unknown>,
     );
     return res.status(result.status).send(result.data);
   }
 
-  @All('metrics')
-  async proxyMetricsRoot(
-    @Req() req: Request,
-    @Res() res: Response,
-    @Query() query: Record<string, unknown>,
-    @Body() body: Record<string, unknown>,
-  ) {
-    return this.proxyMetrics('metrics', req, res, query, body);
+  @Get('risk/status')
+  @ApiOperation({
+    summary: 'Detector risk status (read-only)',
+    description:
+      'Returns current risk module status. Read-only access via proxy.',
+  })
+  async riskStatus(@Req() req: Request, @Res() res: Response) {
+    const result = await this.detectorProxyService.request(
+      'GET',
+      'risk/status',
+      undefined,
+      undefined,
+      req.headers as Record<string, unknown>,
+    );
+    return res.status(result.status).send(result.data);
   }
 
-  @All('metrics/*')
-  async proxyMetricsWithPath(
-    @Req() req: Request,
-    @Res() res: Response,
-    @Query() query: Record<string, unknown>,
-    @Body() body: Record<string, unknown>,
-  ) {
-    const wildcardPath = (req.params?.[0] as string | undefined) || '';
-    const endpoint = `metrics/${wildcardPath.replace(/^\/+/, '')}`;
-    return this.proxyMetrics(endpoint, req, res, query, body);
+  @Get('risk/limits')
+  @ApiOperation({
+    summary: 'Detector risk limits (read-only)',
+    description: 'Returns configured risk limits. Read-only access via proxy.',
+  })
+  async riskLimits(@Req() req: Request, @Res() res: Response) {
+    const result = await this.detectorProxyService.request(
+      'GET',
+      'risk/limits',
+      undefined,
+      undefined,
+      req.headers as Record<string, unknown>,
+    );
+    return res.status(result.status).send(result.data);
   }
 
-  private async proxyMetrics(
+  // ────────────────────── Metrics ──────────────────────
+
+  @Get('metrics')
+  @ApiOperation({
+    summary: 'Detector Prometheus metrics',
+    description:
+      'Returns Prometheus-formatted metrics from the Detector service ' +
+      '(event-bus latency, ingress backpressure).',
+  })
+  @ApiOkResponse({ description: 'Prometheus text/plain metrics' })
+  async metricsRoot(@Req() req: Request, @Res() res: Response) {
+    const result = await this.detectorProxyService.request(
+      'GET',
+      'metrics',
+      undefined,
+      undefined,
+      req.headers as Record<string, unknown>,
+    );
+    return res.status(result.status).send(result.data);
+  }
+
+  @Get('metrics/prometheus')
+  @ApiOperation({
+    summary: 'Detector Prometheus metrics (legacy path)',
+    description:
+      'Legacy path for Prometheus metrics. Returns identical data to GET /metrics.',
+  })
+  async metricsPrometheus(@Req() req: Request, @Res() res: Response) {
+    const result = await this.detectorProxyService.request(
+      'GET',
+      'metrics/prometheus',
+      undefined,
+      undefined,
+      req.headers as Record<string, unknown>,
+    );
+    return res.status(result.status).send(result.data);
+  }
+
+  // ────────────────────── Detector runtime (via wildcard prefix) ──────────────────────
+  // The Detector app currently has minimal HTTP surface.
+  // These endpoints cover the detector/ prefix used by detector instance configs.
+
+  @Get('detector/health')
+  @ApiOperation({
+    summary: 'Detector runtime health',
+    description:
+      'Returns Detector runtime health status (under detector/ prefix).',
+  })
+  async detectorHealth(@Req() req: Request, @Res() res: Response) {
+    return this.forwardDetector(
+      'GET',
+      'health',
+      undefined,
+      undefined,
+      req,
+      res,
+    );
+  }
+
+  @Get('detector/status')
+  @ApiOperation({
+    summary: 'Detector runtime status',
+    description: 'Returns Detector runtime status snapshot.',
+  })
+  async detectorStatus(@Req() req: Request, @Res() res: Response) {
+    return this.forwardDetector(
+      'GET',
+      'status',
+      undefined,
+      undefined,
+      req,
+      res,
+    );
+  }
+
+  @Get('detector/config')
+  @ApiOperation({
+    summary: 'Detector runtime config',
+    description: 'Returns current Detector runtime configuration.',
+  })
+  async detectorConfig(@Req() req: Request, @Res() res: Response) {
+    return this.forwardDetector(
+      'GET',
+      'config',
+      undefined,
+      undefined,
+      req,
+      res,
+    );
+  }
+
+  // ──────────────── helpers ────────────────
+
+  private async forwardDetector(
+    method: string,
     endpoint: string,
+    query: Record<string, unknown> | undefined,
+    body: Record<string, unknown> | undefined,
     req: Request,
     res: Response,
-    query: Record<string, unknown>,
-    body: Record<string, unknown>,
   ) {
-    const method = String(req.method || 'GET').toUpperCase();
     const result = await this.detectorProxyService.request(
       method,
       endpoint,
@@ -112,45 +252,5 @@ export class DetectorProxyController {
       req.headers as Record<string, unknown>,
     );
     return res.status(result.status).send(result.data);
-  }
-
-  private isAllowedRiskProxy(method: string, endpoint: string): boolean {
-    if (method !== 'GET') {
-      return false;
-    }
-    return this.allowedRiskReadEndpoints.has(endpoint.toLowerCase());
-  }
-
-  private logDeniedRiskMutation(req: Request, endpoint: string, method: string): void {
-    const tokenHash = this.extractTokenHash(req.headers as Record<string, unknown>);
-    this.logger.warn(
-      `[risk-proxy-denied] method=${method} path=${endpoint} ip=${this.resolveIp(req)} tokenHash=${tokenHash ?? 'n/a'}`,
-    );
-  }
-
-  private extractTokenHash(headers: Record<string, unknown>): string | undefined {
-    const auth = headers.authorization;
-    const bearer = Array.isArray(auth) ? auth[0] : auth;
-    const bearerToken = typeof bearer === 'string'
-      ? bearer.replace(/^Bearer\s+/i, '').trim()
-      : '';
-    const apiTokenRaw = headers['x-api-token'];
-    const apiToken = Array.isArray(apiTokenRaw) ? String(apiTokenRaw[0] ?? '') : String(apiTokenRaw ?? '');
-    const token = bearerToken || apiToken.trim();
-    if (!token) {
-      return undefined;
-    }
-    return createHash('sha256').update(token).digest('hex');
-  }
-
-  private resolveIp(req: Request): string {
-    const xff = req.headers['x-forwarded-for'];
-    if (typeof xff === 'string' && xff.trim().length > 0) {
-      return xff.split(',')[0].trim();
-    }
-    if (Array.isArray(xff) && xff.length > 0 && String(xff[0]).trim().length > 0) {
-      return String(xff[0]).split(',')[0].trim();
-    }
-    return req.ip || req.socket?.remoteAddress || 'unknown';
   }
 }

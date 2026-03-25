@@ -4,20 +4,17 @@ import { ConnectorEntity } from '../../repositories/connector.repository';
 
 @Injectable()
 export class ConnectorEventAdapter {
-    constructor(private readonly events: EventSinkRepository) { }
+  constructor(private readonly events: EventSinkRepository) {}
 
-    emitUpdate(connector: ConnectorEntity) {
-        this.events.emit(
-            'connector.update',
-            {
-                category: 'connector',
-                action: 'update',
-                // entity: 'ConnectorEntity',
-                // reference: connector.connectorType,
-                connectorType: connector.connectorType,
-                data: connector,
-                timestamp: Date.now(),
-            }
-        );
-    }
+  emitUpdate(connector: ConnectorEntity) {
+    this.events.emit('connector.update', {
+      category: 'connector',
+      action: 'update',
+      // entity: 'ConnectorEntity',
+      // reference: connector.connectorType,
+      connectorType: connector.connectorType,
+      data: connector,
+      timestamp: Date.now(),
+    });
+  }
 }

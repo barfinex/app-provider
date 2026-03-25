@@ -6,7 +6,6 @@ import { CandleWriterService } from '../candle-writer.service';
 import { isInvalidOhlc } from '../candle-validation';
 import { HoleDetector } from './hole-detector';
 import { normalize } from '../aggregation/aggregation.utils';
-import { DerivedCandleService } from '../derived/derived-candle.service';
 
 interface WarmupLogMeta {
   opId: string;
@@ -26,7 +25,6 @@ export class SymbolHistoryService {
   constructor(
     private readonly query: CandleQueryService,
     private readonly writer: CandleWriterService,
-    private readonly derivedCandleService: DerivedCandleService,
   ) {}
 
   private warmupPrefix(meta: WarmupLogMeta): string {
@@ -37,7 +35,9 @@ export class SymbolHistoryService {
   }
 
   private createWarmupOpId(): string {
-    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`.toUpperCase();
+    return `${Date.now().toString(36)}-${Math.random()
+      .toString(36)
+      .slice(2, 8)}`.toUpperCase();
   }
 
   private warmupLog(message: string): void {
@@ -60,36 +60,27 @@ export class SymbolHistoryService {
     minTimeExclusive?: number;
     logMeta?: WarmupLogMeta;
   }): Promise<Candle[]> {
-    const { connectorType, marketType, symbol, interval, from, to, requestFn, minTimeExclusive, logMeta } = args;
-    const ctx = logMeta?.ctx ?? ({
+    const {
+      connectorType,
+      marketType,
       symbol,
-      tf: interval,
-      connectorType: String(connectorType),
-      marketType: String(marketType),
-    } as const);
+      interval,
+      from,
+      to,
+      requestFn,
+      minTimeExclusive,
+      logMeta,
+    } = args;
+    const ctx =
+      logMeta?.ctx ??
+      ({
+        symbol,
+        tf: interval,
+        connectorType: String(connectorType),
+        marketType: String(marketType),
+      } as const);
     const meta = logMeta ?? { opId: this.createWarmupOpId(), ctx };
     const logPrefix = this.warmupPrefix(meta);
-
-    if (ctx.tf === TimeFrame.week || ctx.tf === TimeFrame.month) {
-      this.warmupLog(`${logPrefix} [DERIVED] Weekly/monthly candles will be computed internally`);
-      await this.derivedCandleService.recomputeRangeFromDaily({
-        symbol: ctx.symbol,
-        connectorType: ctx.connectorType,
-        marketType: ctx.marketType,
-        interval: ctx.tf,
-        fromMs: from,
-        toMs: to,
-      });
-      return this.query.loadRange({
-        symbol: ctx.symbol,
-        connectorType: ctx.connectorType,
-        marketType: ctx.marketType,
-        interval: ctx.tf,
-        from,
-        to,
-        logMeta: meta,
-      });
-    }
 
     const local = await this.query.loadRange({
       symbol: ctx.symbol,
@@ -102,19 +93,22 @@ export class SymbolHistoryService {
     });
 
     const holes = HoleDetector.find(local, from, to, ctx.tf);
-    this.warmupLog(`${logPrefix} loadForSymbol local=${local.length} rows, holes=${holes.length}`);
+    this.warmupLog(
+      `${logPrefix} loadForSymbol local=${local.length} rows, holes=${holes.length}`,
+    );
     if (!holes.length) return local;
 
     const filled: Candle[] = [...local];
+    const existingTimes = new Set<number>(local.map((c) => c.time));
 
     for (const hole of holes) {
       this.warmupLog(
-        `${logPrefix} fetching REST hole ${new Date(hole.from).toISOString()}..${new Date(
-          hole.to,
-        ).toISOString()}`,
+        `${logPrefix} fetching REST hole ${new Date(
+          hole.from,
+        ).toISOString()}..${new Date(hole.to).toISOString()}`,
       );
 
-      let raw = await requestFn(hole.from, hole.to, ctx.symbol, ctx.tf);
+      const raw = await requestFn(hole.from, hole.to, ctx.symbol, ctx.tf);
 
       let toWrite = Array.isArray(raw) ? raw : [];
       toWrite = toWrite.filter(
@@ -128,18 +122,30 @@ export class SymbolHistoryService {
           Number.isFinite(c.volume) &&
           !isInvalidOhlc(c),
       );
+      const beforeExistingFilter = toWrite.length;
+      toWrite = toWrite.filter((c: Candle) => !existingTimes.has(c.time));
+      const skippedExisting = beforeExistingFilter - toWrite.length;
+      if (skippedExisting > 0) {
+        this.warmupDebug(
+          `${logPrefix} CANDLE_DUPLICATE_SKIPPED existing=${skippedExisting}`,
+        );
+      }
       if (minTimeExclusive != null) {
         const before = toWrite.length;
         toWrite = toWrite.filter((c: Candle) => c.time > minTimeExclusive);
         if (toWrite.length < before) {
           this.warmupDebug(
-            `${logPrefix} dedup dropped=${before - toWrite.length} candles with time <= ${minTimeExclusive}`,
+            `${logPrefix} dedup dropped=${
+              before - toWrite.length
+            } candles with time <= ${minTimeExclusive}`,
           );
         }
       }
       const dropped = (Array.isArray(raw) ? raw.length : 0) - toWrite.length;
       if (dropped > 0) {
-        this.warmupDebug(`${logPrefix} dropped ${dropped} candles with invalid OHLC/non-finite fields`);
+        this.warmupDebug(
+          `${logPrefix} dropped ${dropped} candles with invalid OHLC/non-finite fields`,
+        );
       }
 
       this.warmupLog(`${logPrefix} writing ${toWrite.length} candles to DB`);
@@ -154,6 +160,9 @@ export class SymbolHistoryService {
       );
 
       filled.push(...toWrite);
+      for (const candle of toWrite) {
+        existingTimes.add(candle.time);
+      }
     }
 
     return normalize(filled);

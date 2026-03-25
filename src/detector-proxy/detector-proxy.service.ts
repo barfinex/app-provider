@@ -1,10 +1,5 @@
 import { HttpService } from '@nestjs/axios';
-import {
-  HttpException,
-  HttpStatus,
-  Injectable,
-  Logger,
-} from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { AxiosRequestConfig } from 'axios';
 import { lastValueFrom } from 'rxjs';
 
@@ -23,7 +18,13 @@ interface DetectorProxyErrorResponse {
 export class DetectorProxyService {
   private readonly logger = new Logger(DetectorProxyService.name);
   private readonly timeoutMs = this.resolveTimeoutMs();
-  private readonly allowedMethods = new Set(['GET', 'POST', 'DELETE', 'PUT', 'PATCH']);
+  private readonly allowedMethods = new Set([
+    'GET',
+    'POST',
+    'DELETE',
+    'PUT',
+    'PATCH',
+  ]);
   private readonly forwardTraceHeaders = ['x-request-id', 'x-correlation-id'];
 
   constructor(private readonly httpService: HttpService) {}
@@ -94,7 +95,9 @@ export class DetectorProxyService {
   }
 
   private buildDetectorUrl(endpoint: string): string {
-    const baseUrl = (process.env.DETECTOR_API_URL || 'http://localhost:8101/api')
+    const baseUrl = (
+      process.env.DETECTOR_API_URL || 'http://localhost:8101/api'
+    )
       .trim()
       .replace(/\/+$/, '');
     const cleanEndpoint = endpoint.replace(/^\/+/, '');
@@ -119,7 +122,7 @@ export class DetectorProxyService {
       const value = input[name];
       if (value === undefined || value === null) continue;
       headers[name] = Array.isArray(value)
-        ? value.map(item => String(item)).join(', ')
+        ? value.map((item) => String(item)).join(', ')
         : String(value);
     }
     return headers;
@@ -149,7 +152,8 @@ export class DetectorProxyService {
 
   private extractErrorMessage(input: unknown): string {
     if (typeof input === 'string' && input.trim().length > 0) return input;
-    if (typeof input !== 'object' || input === null) return 'Detector request failed';
+    if (typeof input !== 'object' || input === null)
+      return 'Detector request failed';
 
     const asRecord = input as Record<string, unknown>;
     const candidate = asRecord.error ?? asRecord.message;

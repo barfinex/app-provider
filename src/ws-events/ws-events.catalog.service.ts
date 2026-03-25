@@ -53,8 +53,7 @@ export class WsEventsCatalogService {
         nameEn: 'Test inbound message',
         descriptionRu:
           'Служебное клиентское сообщение для проверки канала обмена.',
-        descriptionEn:
-          'Utility client event used to validate message flow.',
+        descriptionEn: 'Utility client event used to validate message flow.',
       },
       {
         systemName: 'response',
@@ -63,10 +62,8 @@ export class WsEventsCatalogService {
         source: 'gateway',
         nameRu: 'Тестовый ответ сервера',
         nameEn: 'Test server response',
-        descriptionRu:
-          'Служебный ответ на событие message.',
-        descriptionEn:
-          'Utility response emitted for the message event.',
+        descriptionRu: 'Служебный ответ на событие message.',
+        descriptionEn: 'Utility response emitted for the message event.',
       },
       {
         systemName: 'event',
@@ -83,7 +80,7 @@ export class WsEventsCatalogService {
     ];
 
     const domainEvents = (Object.values(SubscriptionType) as string[]).map(
-      systemName => this.toCatalogItem(systemName),
+      (systemName) => this.toCatalogItem(systemName),
     );
 
     const items = [...builtins, ...domainEvents];

@@ -85,14 +85,11 @@
 //     private readyPromise!: Promise<void>;
 //     private resolveReady!: () => void;
 
-
-
 //     private isEmitToRedisEnabled = true
 
 //     private lastSymbolsHash: string | null = null;
 
 //     private connectorType = ConnectorType.binance
-
 
 //     private subscription: {
 //         options?: { symbols: Symbol[], intervals?: TimeFrame[] }
@@ -232,19 +229,16 @@
 //         this.logger.log('✅ BinanceService ModuleInit complete');
 //     }
 
-
 //     // async onApplicationBootstrap() {
 //     //     this.ready = true;
 //     //     this.resolveReady();
 //     //     this.logger.log('🚀 BinanceService fully ready AFTER bootstrap');
 //     // }
 
-
 //     async ensureReady(): Promise<void> {
 //         if (this.ready) return;
 //         await this.readyPromise;
 //     }
-
 
 //     /**
 //      * Fetches current prices for the given symbols in a specified market type.
@@ -265,7 +259,6 @@
 //         //     this.logger.warn('[BinanceService] API not initialized, returning empty prices');
 //         //     return result;
 //         // }
-
 
 //         switch (marketType) {
 //             case MarketType.spot:
@@ -306,7 +299,6 @@
 //         });
 //     }
 
-
 //     /**
 //      * Retrieves asset and position information for a specified market type.
 //      * @param marketType - Market type (spot or futures).
@@ -327,7 +319,6 @@
 //         //     this.logger.warn('[BinanceService] API not initialized, returning empty prices');
 //         //     return result;
 //         // }
-
 
 //         switch (marketType) {
 //             case MarketType.spot:
@@ -488,7 +479,6 @@
 //         return result;
 //     }
 
-
 //     /**
 //      * Retrieves detailed account information for a specified market type.
 //      * @param marketType - Market type (spot or futures).
@@ -515,7 +505,6 @@
 //         //     return result;
 //         // }
 
-
 //         let startIncomeTime = Number(moment.utc(moment().utc()).add(-1, 'days').format('x'))
 //         let endIncomeTime = Number(moment().utc().format('x'))
 
@@ -525,9 +514,7 @@
 
 //                 const pricesSpot = await this.api?.prices();
 
-
 //                 const accountInfoSpot = (await this.api?.accountInfo())?.balances.filter(q => parseFloat(q.free) != 0 || parseFloat(q.locked));
-
 
 //                 accountInfoSpot?.forEach(element => {
 //                     result.assets.push({
@@ -634,8 +621,6 @@
 
 //                 }
 
-
-
 //                 const futuresIncome: FuturesIncomeResult[] = await this.api?.futuresIncome({
 //                     startTime: startIncomeTime,
 //                 })
@@ -651,7 +636,6 @@
 //                         income += Number(element.income)
 //                     }
 //                 }
-
 
 //                 const details: AccountDailyProfitDetail[] = []
 //                 futuresIncome.forEach(income => {
@@ -715,7 +699,6 @@
 //         //     return result;
 //         // }
 
-
 //         if (!order.useSandbox) {
 //             switch (order.marketType) {
 //                 case MarketType.spot:
@@ -771,7 +754,6 @@
 //                                 } as NewOrderSL
 //                             break;
 //                     }
-
 
 //                     const spotOrderEntity = await this.api?.order(spotOrderToProvider)
 //                     result.externalId = spotOrderEntity.orderId.toString()
@@ -887,8 +869,6 @@
 //         return result;
 //     }
 
-
-
 //     /**
 //      * Closes an existing order by its ID.
 //      * @param options - Object containing the order ID, symbol, and market type.
@@ -904,7 +884,6 @@
 //         //     this.logger.warn('[BinanceService] API not initialized, returning empty prices');
 //         //     return result;
 //         // }
-
 
 //         const { id, symbol, marketType } = options
 
@@ -936,7 +915,6 @@
 //         result.marketType = marketType
 //         result.connectorType = this.connectorType
 
-
 //         if (element) await this.api?.futuresCancelOrder({ orderId: +id, symbol: symbol.name })
 
 //         return result
@@ -960,7 +938,6 @@
 //         }
 
 //     }
-
 
 //     /**
 //      * Retrieves a list of open orders for a specific symbol and market type.
@@ -1011,7 +988,6 @@
 //                     connectorType: this.connectorType,
 //                     closeTime: null
 //                 };
-
 
 //                 result.push(order);
 //             }
@@ -1103,7 +1079,6 @@
 
 //         const subscriptionsConfig = connector.subscriptions || [];
 
-
 //         for (const subscriptionConfig of subscriptionsConfig) {
 
 //             // console.log('subscriptionsConfig', subscriptionConfig);
@@ -1112,7 +1087,6 @@
 //             if (!subscriptionConfig.active) continue;
 
 //             switch (subscriptionConfig.type) {
-
 
 //                 case SubscriptionType.PROVIDER_ACCOUNT_EVENT:
 //                     try {
@@ -1131,8 +1105,6 @@
 //                         );
 //                     }
 //                     break;
-
-
 
 //                 case SubscriptionType.INSPECTOR_RISK_LIMIT_BREACH:
 //                     break;
@@ -1164,7 +1136,6 @@
 //                         );
 //                     }
 //                     break;
-
 
 //                 case SubscriptionType.PROVIDER_ORDER_CLOSE:
 //                 case SubscriptionType.PROVIDER_ORDER_CREATE:
@@ -1198,7 +1169,6 @@
 //                             this.handlerForSymbols
 //                         );
 
-
 //                         this.logger.log(
 //                             `Subscribed to PROVIDER_SYMBOLS for ${marketType} market. Symbols will refresh every hour.`
 //                         );
@@ -1209,8 +1179,6 @@
 //                     }
 
 //                     break;
-
-
 
 //                 case SubscriptionType.PROVIDER_SYMBOL_PRICES:
 //                     try {
@@ -1251,8 +1219,6 @@
 
 //         await this.delay(2000);
 //     }
-
-
 
 //     public async subscribeToSymbols(
 //         options: { marketType: MarketType },
@@ -1314,7 +1280,6 @@
 //         };
 //     }
 
-
 //     chunkSymbols(symbols: string[], maxPerWs = 50, maxUrlLength = 1900): string[][] {
 //         const result: string[][] = [];
 //         let batch: string[] = [];
@@ -1341,7 +1306,6 @@
 
 //         return result;
 //     }
-
 
 //     public async subscribeToSymbolPrices(
 //         options: { marketType: MarketType; symbols: string[] },
@@ -1421,8 +1385,6 @@
 //         };
 //     }
 
-
-
 //     /**
 //      * Updates the subscription collection by adding or removing symbols and intervals.
 //      * @param marketType - The market type (e.g., spot, futures).
@@ -1432,13 +1394,11 @@
 //      */
 //     public async updateSubscribeCollection(marketType: MarketType, symbols: Symbol[], intervals?: TimeFrame[]): Promise<void> {
 
-
 //         this.subscription.options = { symbols, intervals }
 //         this.unsubscribe()
 //         this.subscribe(marketType, symbols, intervals)
 
 //     }
-
 
 //     private async handlerForAccount(marketType: MarketType, accountEvent: AccountEvent) {
 //         const subscriptionType = SubscriptionType.PROVIDER_ACCOUNT_EVENT;
@@ -1518,15 +1478,11 @@
 //         }
 //     }
 
-
-
 //     private async handlerForOrderbook(marketType: MarketType, orderbook: OrderBook) {
 //         const subscriptionType = SubscriptionType.PROVIDER_MARKETDATA_ORDERBOOK;
 
 //         const bids = [...orderbook.bids.entries()].reverse().map(([, value]) => value);
 //         const orderbookSort: OrderBook = { ...orderbook, bids };
-
-
 
 //         const matchedSubscription = this.getMatchedSubscription(
 //             this.connectorType,
@@ -1561,9 +1517,6 @@
 //             this.client.emit(subscriptionType, subscriptionValue);
 //         }
 //     };
-
-
-
 
 //     private async handlerForSymbols(marketType: MarketType, symbols: Symbol[]) {
 //         const subscriptionType = SubscriptionType.PROVIDER_SYMBOLS;
@@ -1626,9 +1579,6 @@
 //         );
 //     }
 
-
-
-
 //     // утилита для подсчёта хэша
 //     private hashSymbols(symbols: Symbol[]): string {
 //         return symbols
@@ -1636,7 +1586,6 @@
 //             .sort()
 //             .join('|');
 //     }
-
 
 //     private handlerForSymbolPrices(
 //         marketType: MarketType,
@@ -1675,7 +1624,6 @@
 //             tradeCount: payload.n,
 //         } as any;
 
-
 //         const subscription: Subscription = {
 //             type: subscriptionType,
 //             updateMoment: Date.now(),
@@ -1708,9 +1656,6 @@
 //         }
 //     };
 
-
-
-
 //     private getMatchedSubscription(
 //         connectorType: ConnectorType,
 //         marketType: MarketType,
@@ -1741,12 +1686,8 @@
 //         return matchedSubscription;
 //     }
 
-
-
 //     private async handlerForTrade(marketType: MarketType, trade: Trade) {
 //         const subscriptionType = SubscriptionType.PROVIDER_MARKETDATA_TRADE;
-
-
 
 //         const subscription: Subscription = {
 //             type: subscriptionType,
@@ -1754,7 +1695,6 @@
 //             symbols: this.getMatchedSubscription(this.connectorType, marketType, subscriptionType).symbols,
 //             active: true
 //         };
-
 
 //         const subscriptionValue: SubscriptionValue = {
 //             value: trade,
@@ -1766,13 +1706,11 @@
 //             },
 //         };
 
-
 //         ConnectorService.addSubscription({
 //             connectorType: this.connectorType,
 //             marketType,
 //             subscription
 //         });
-
 
 //         // console.log('Emitting trade:', subscriptionValue);
 
@@ -1788,7 +1726,6 @@
 //         }
 //     };
 
-
 //     private async handlerForCandle(
 //         marketType: MarketType,
 //         candle: Candle
@@ -1800,7 +1737,6 @@
 //                 ...candle,
 //                 symbol: { name: String((candle.symbol as any)?.name || candle.symbol) },
 //             };
-
 
 //             const subscription: Subscription = {
 //                 type: subscriptionType,
@@ -1819,7 +1755,6 @@
 //                 },
 //             };
 
-
 //             ConnectorService.addSubscription({
 //                 connectorType: this.connectorType,
 //                 marketType,
@@ -1833,8 +1768,6 @@
 //             this.logger.error(`Error in handlerForCandle: ${err?.message || err}`);
 //         }
 //     };
-
-
 
 //     public async subscribeToСandles(
 //         options: { marketType: MarketType; symbols: Symbol[]; interval: TimeFrame },
@@ -1867,7 +1800,6 @@
 //             });
 //         };
 //     }
-
 
 //     public async subscribeToOrderBook(options: { marketType: MarketType, symbols: Symbol[] }, handler: OrderBookHandler) {
 //         const { marketType, symbols } = options
@@ -1980,11 +1912,6 @@
 //         };
 //     }
 
-
-
-
-
-
 //     private accountAdapter(marketType: MarketType, handler: AccountEventHandler) {
 //         return (msg: OutboundAccountInfo | ExecutionReport | AccountUpdate | OrderUpdate | AccountConfigUpdate | MarginCall | UserDataStreamEvent) => {
 //             let options: any = {};
@@ -2065,7 +1992,6 @@
 //         };
 //     }
 
-
 //     private symbolsAdapter(
 //         marketType: MarketType,
 //         handler: (marketType: MarketType, symbols: Symbol[]) => Promise<void>
@@ -2096,8 +2022,6 @@
 //         };
 //     }
 
-
-
 //     private symbolPricesAdapter(
 //         marketType: MarketType,
 //         handler: (marketType: MarketType, symbolPrice: SymbolPrice) => void,
@@ -2114,9 +2038,6 @@
 //         };
 //     }
 
-
-
-
 //     private tradeAdapter(marketType: MarketType, handler: TradeHandler) {
 //         return (msg: BinanceAggregatedTrade) => {
 //             handler.call(
@@ -2132,7 +2053,6 @@
 //             );
 //         };
 //     }
-
 
 //     private orderBookAdapter(marketType: MarketType, handler: OrderBookHandler) {
 //         const self = this;
@@ -2160,11 +2080,10 @@
 //         };
 //     }
 
-
 //     // BinanceService.ts
 //     convertTimeFrame(interval: TimeFrame) {
 //         switch (interval) {
-//             case TimeFrame.min1: return CandleChartInterval.ONE_MINUTE; 
+//             case TimeFrame.min1: return CandleChartInterval.ONE_MINUTE;
 //             case TimeFrame.min5: return CandleChartInterval.FIVE_MINUTES;
 //             case TimeFrame.min15: return CandleChartInterval.FIFTEEN_MINUTES;
 //             case TimeFrame.min30: return CandleChartInterval.THIRTY_MINUTES;
@@ -2172,8 +2091,6 @@
 //             case TimeFrame.h2: return CandleChartInterval.TWO_HOURS;
 //             case TimeFrame.h4: return CandleChartInterval.FOUR_HOURS;
 //             case TimeFrame.day: return CandleChartInterval.ONE_DAY;
-//             case TimeFrame.week: return CandleChartInterval.ONE_WEEK; 
-//             case TimeFrame.month: return CandleChartInterval.ONE_MONTH;
 //         }
 //         throw new AppError(ErrorEnvironment.Provider, 'Unsupported interval');
 //     }

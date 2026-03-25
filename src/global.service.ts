@@ -17,7 +17,6 @@
 
 //         if (!GlobalService.connector[connectorType + marketType]?.subscriptions) GlobalService.connector[connectorType + marketType].subscriptions = []
 
-
 //         if (!GlobalService.connector[connectorType + marketType]?.subscriptions?.find(q => q.type === subscription.type && q.symbol === subscription.symbol)) {
 //             GlobalService.connector[connectorType + marketType].subscriptions.push(subscription);
 //         }
@@ -47,4 +46,3 @@
 // //     public updateMomentOrderbook?: number
 
 // // }
-

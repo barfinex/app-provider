@@ -7,13 +7,20 @@ import { QuestDBWriteService } from '../questdb/questdb-write.service';
 import { QuestDBDDLService } from '../questdb/questdb-ddl.service';
 import { ProviderMarketdataMetricsService } from './provider-marketdata-metrics.service';
 
-type McpSupervisorState = 'starting' | 'running' | 'restarting' | 'cooldown' | 'stopping' | 'unknown';
+type McpSupervisorState =
+  | 'starting'
+  | 'running'
+  | 'restarting'
+  | 'cooldown'
+  | 'stopping'
+  | 'unknown';
 
 @Injectable()
 export class ProviderRuntimeHealthService {
   private readonly bootedAtMs = Date.now();
-  private readonly mcpSupervisorStatusFile = process.env.PROVIDER_MCP_SUPERVISOR_STATUS_FILE
-    || resolve(process.cwd(), '.runtime/provider-mcp-supervisor.json');
+  private readonly mcpSupervisorStatusFile =
+    process.env.PROVIDER_MCP_SUPERVISOR_STATUS_FILE ||
+    resolve(process.cwd(), '.runtime/provider-mcp-supervisor.json');
   private readonly mcpSupervisorStaleMs = Math.max(
     1000,
     Number(process.env.PROVIDER_MCP_SUPERVISOR_STALE_MS || 15_000),
@@ -42,10 +49,13 @@ export class ProviderRuntimeHealthService {
     1,
     Number(process.env.PROVIDER_ALERT_WS_RECONNECT_ATTEMPTS_WARN || 25),
   );
-  private readonly walReadinessStrict = String(
-    process.env.QUESTDB_STOP_ON_WAL_SUSPENDED
-      || (String(process.env.NODE_ENV || '').toLowerCase() === 'production' ? 'true' : 'false'),
-  ).toLowerCase() === 'true';
+  private readonly walReadinessStrict =
+    String(
+      process.env.QUESTDB_STOP_ON_WAL_SUSPENDED ||
+        (String(process.env.NODE_ENV || '').toLowerCase() === 'production'
+          ? 'true'
+          : 'false'),
+    ).toLowerCase() === 'true';
 
   constructor(
     private readonly redis: BinanceRedisService,
@@ -80,13 +90,18 @@ export class ProviderRuntimeHealthService {
     );
     const degradedChecks: string[] = [];
 
-    if (!questdbMetrics.questdb_writer_connected.total) degradedChecks.push('questdbDisconnected');
+    if (!questdbMetrics.questdb_writer_connected.total)
+      degradedChecks.push('questdbDisconnected');
     if (walStatus.suspended) degradedChecks.push('questdbWalSuspended');
-    if (mcpSupervisorState !== 'running') degradedChecks.push(`mcpSupervisorState:${mcpSupervisorState}`);
+    if (mcpSupervisorState !== 'running')
+      degradedChecks.push(`mcpSupervisorState:${mcpSupervisorState}`);
     if (hasWsStall) degradedChecks.push('streamStallDetected');
-    if (lagSummary.maxLagMs >= this.lagWarnMs) degradedChecks.push('marketdataLagHigh');
+    if (lagSummary.maxLagMs >= this.lagWarnMs)
+      degradedChecks.push('marketdataLagHigh');
 
-    const readinessGreen = redisMetrics.connected === 1 && (!this.walReadinessStrict || !walStatus.suspended);
+    const readinessGreen =
+      redisMetrics.connected === 1 &&
+      (!this.walReadinessStrict || !walStatus.suspended);
     return {
       ready: readinessGreen,
       status: readinessGreen ? 'ready' : 'not_ready',
@@ -136,7 +151,8 @@ export class ProviderRuntimeHealthService {
       redisReconnectAttempt: redisMetrics.reconnectAttempt,
       questdbBufferSize: questdbMetrics.questdb_writer_buffer_size.total,
       questdbDroppedRows: droppedRows,
-      questdbReconnectAttempts: questdbMetrics.questdb_writer_reconnect_attempts.total,
+      questdbReconnectAttempts:
+        questdbMetrics.questdb_writer_reconnect_attempts.total,
       /** Writer health snapshot for diagnostics: queue, circuit, backpressure, batch. */
       questdbWriterHealth: {
         queueSize: questdbWriterHealth.queueSize,
@@ -157,11 +173,15 @@ export class ProviderRuntimeHealthService {
       },
       alerts: {
         provider_marketdata_lag_ms: lagSummary.maxLagMs >= this.lagWarnMs,
-        redisEmitQueueSize: redisMetrics.emitQueueSize >= this.redisQueueWarnSize,
-        questdbBufferSize: questdbMetrics.questdb_writer_buffer_size.total >= this.questdbBufferWarnSize,
+        redisEmitQueueSize:
+          redisMetrics.emitQueueSize >= this.redisQueueWarnSize,
+        questdbBufferSize:
+          questdbMetrics.questdb_writer_buffer_size.total >=
+          this.questdbBufferWarnSize,
         redisDroppedEvents: droppedEvents >= this.redisDroppedEventsWarn,
         questdbDroppedRows: droppedRows >= this.questdbDroppedRowsWarn,
-        websocketReconnectAttempts: reconnectAttempts >= this.wsReconnectAttemptsWarn,
+        websocketReconnectAttempts:
+          reconnectAttempts >= this.wsReconnectAttemptsWarn,
       },
     };
   }
@@ -174,17 +194,20 @@ export class ProviderRuntimeHealthService {
         updatedAt?: string;
       };
       const updatedAt = Date.parse(parsed.updatedAt || '');
-      if (!Number.isFinite(updatedAt) || Date.now() - updatedAt > this.mcpSupervisorStaleMs) {
+      if (
+        !Number.isFinite(updatedAt) ||
+        Date.now() - updatedAt > this.mcpSupervisorStaleMs
+      ) {
         return 'unknown';
       }
 
       const state = parsed.state;
       if (
-        state === 'starting'
-        || state === 'running'
-        || state === 'restarting'
-        || state === 'cooldown'
-        || state === 'stopping'
+        state === 'starting' ||
+        state === 'running' ||
+        state === 'restarting' ||
+        state === 'cooldown' ||
+        state === 'stopping'
       ) {
         return state;
       }

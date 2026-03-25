@@ -96,7 +96,8 @@ export class OrderRepository {
   }
 
   async findAndCount(where: string, limit?: number, offset?: number) {
-    const hasLimit = typeof limit === 'number' && Number.isFinite(limit) && limit > 0;
+    const hasLimit =
+      typeof limit === 'number' && Number.isFinite(limit) && limit > 0;
     const safeOffset =
       typeof offset === 'number' && Number.isFinite(offset) && offset > 0
         ? Math.floor(offset)

@@ -19,7 +19,8 @@ function progressKey(symbol: string, interval: TimeFrame | string): string {
 }
 
 function formatRowsPerSec(rowsPerSec: number): string {
-  if (rowsPerSec >= 1_000_000) return `${(rowsPerSec / 1_000_000).toFixed(1)}M/s`;
+  if (rowsPerSec >= 1_000_000)
+    return `${(rowsPerSec / 1_000_000).toFixed(1)}M/s`;
   if (rowsPerSec >= 1_000) return `${(rowsPerSec / 1_000).toFixed(0)}k/s`;
   if (rowsPerSec >= 1) return `${Math.round(rowsPerSec)}/s`;
   return '<1/s';
@@ -29,7 +30,9 @@ function progressBar(written: number, total: number): string {
   if (total <= 0) return EMPTY_CHAR.repeat(PROGRESS_BAR_LEN);
   const ratio = Math.min(1, written / total);
   const filled = Math.round(ratio * PROGRESS_BAR_LEN);
-  return FILL_CHAR.repeat(filled) + EMPTY_CHAR.repeat(PROGRESS_BAR_LEN - filled);
+  return (
+    FILL_CHAR.repeat(filled) + EMPTY_CHAR.repeat(PROGRESS_BAR_LEN - filled)
+  );
 }
 
 @Injectable()
@@ -44,7 +47,9 @@ export class ConsoleWarmupProgressService implements OnModuleDestroy {
     this.isTty =
       typeof process !== 'undefined' &&
       process.stdout != null &&
-      Boolean((process.stdout as NodeJS.WriteStream & { isTTY?: boolean }).isTTY);
+      Boolean(
+        (process.stdout as NodeJS.WriteStream & { isTTY?: boolean }).isTTY,
+      );
     this.patchStdoutForLiveProgress();
   }
 
@@ -84,7 +89,9 @@ export class ConsoleWarmupProgressService implements OnModuleDestroy {
     }
     if (!this.isTty && p != null) {
       (process.stdout as NodeJS.WriteStream).write(
-        `[Warmup] ${symbol} ${String(interval)}: ${p.written} / ${p.total} rows done\n`,
+        `[Warmup] ${symbol} ${String(interval)}: ${p.written} / ${
+          p.total
+        } rows done\n`,
       );
     }
     if (this.instruments.size === 0) this.stopTicker();
@@ -135,13 +142,20 @@ export class ConsoleWarmupProgressService implements OnModuleDestroy {
         typeof chunk === 'string'
           ? chunk
           : Buffer.isBuffer(chunk)
-            ? chunk.toString()
-            : '';
-      if (this.lastRenderedWidth > 0 && text.length > 0 && !text.startsWith('\r')) {
+          ? chunk.toString()
+          : '';
+      if (
+        this.lastRenderedWidth > 0 &&
+        text.length > 0 &&
+        !text.startsWith('\r')
+      ) {
         originalWrite('\n');
         this.lastRenderedWidth = 0;
       }
-      return (originalWrite as (...inner: unknown[]) => unknown)(chunk, ...args);
+      return (originalWrite as (...inner: unknown[]) => unknown)(
+        chunk,
+        ...args,
+      );
     }) as NodeJS.WriteStream['write'];
 
     stdout.__warmupProgressPatched = true;
@@ -155,7 +169,11 @@ export class ConsoleWarmupProgressService implements OnModuleDestroy {
     const etaStr = etaSec >= 0.1 ? ` ETA ${etaSec.toFixed(1)}s` : '';
     const bar = progressBar(p.written, p.total);
     const rpsStr = formatRowsPerSec(rowsPerSec);
-    return `${p.symbol.padEnd(10)} ${String(p.interval).padEnd(5)} ${bar}  ${String(p.written).padStart(6)} / ${p.total}  ${rpsStr.padStart(6)}${etaStr}`.trimEnd();
+    return `${p.symbol.padEnd(10)} ${String(p.interval).padEnd(
+      5,
+    )} ${bar}  ${String(p.written).padStart(6)} / ${p.total}  ${rpsStr.padStart(
+      6,
+    )}${etaStr}`.trimEnd();
   }
 
   private tick(): void {
@@ -171,7 +189,9 @@ export class ConsoleWarmupProgressService implements OnModuleDestroy {
       if (firstInstrument == null) firstInstrument = p;
       totalWritten += p.written;
       totalTotal += p.total;
-      signatureParts.push(`${p.symbol}|${String(p.interval)}:${p.written}/${p.total}`);
+      signatureParts.push(
+        `${p.symbol}|${String(p.interval)}:${p.written}/${p.total}`,
+      );
     }
     if (firstInstrument == null) return;
     const signature = signatureParts.join(';');

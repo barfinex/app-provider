@@ -96,8 +96,8 @@ export class DashboardService {
       eventSinkWal,
     } = args;
 
-    const activeConnectors = connectors.filter(c => c?.isActive).length;
-    const activeDetectors = detectors.filter(d => d?.isActive).length;
+    const activeConnectors = connectors.filter((c) => c?.isActive).length;
+    const activeDetectors = detectors.filter((d) => d?.isActive).length;
 
     const registryByType = {
       advisor: { active: 0, total: 0 },
@@ -107,11 +107,7 @@ export class DashboardService {
     let staleApps = 0;
     for (const row of registryRows) {
       const key = String(row?.appType ?? '');
-      if (
-        key === 'advisor' ||
-        key === 'inspector' ||
-        key === 'detector'
-      ) {
+      if (key === 'advisor' || key === 'inspector' || key === 'detector') {
         registryByType[key].total += 1;
         if (row?.isActive) registryByType[key].active += 1;
       }
@@ -126,7 +122,7 @@ export class DashboardService {
         env: process.env.NODE_ENV ?? 'local',
       },
       registry: {
-        activeTotal: registryRows.filter(r => r?.isActive).length,
+        activeTotal: registryRows.filter((r) => r?.isActive).length,
         total: registryRows.length,
         staleOrInactive: staleApps,
         byType: registryByType,
@@ -273,7 +269,11 @@ export class DashboardService {
     for (const item of candidates) {
       const currency = String(item?.currency ?? '').toUpperCase();
       const value = Number(item?.value);
-      if ((currency === 'USDT' || currency === 'USD' || currency === 'USDC') && Number.isFinite(value) && value > 0) {
+      if (
+        (currency === 'USDT' || currency === 'USD' || currency === 'USDC') &&
+        Number.isFinite(value) &&
+        value > 0
+      ) {
         return value;
       }
     }
@@ -285,7 +285,11 @@ export class DashboardService {
     infra: Record<string, any>;
     trading: Record<string, any>;
   }): Array<{ severity: 'info' | 'warning'; code: string; message: string }> {
-    const alerts: Array<{ severity: 'info' | 'warning'; code: string; message: string }> = [];
+    const alerts: Array<{
+      severity: 'info' | 'warning';
+      code: string;
+      message: string;
+    }> = [];
     const infra = args.infra;
     const trading = args.trading;
 
@@ -317,9 +321,7 @@ export class DashboardService {
       });
     }
 
-    const eventsLast1m = Number(
-      infra.realtime?.eventSink?.eventsLast1m ?? 0,
-    );
+    const eventsLast1m = Number(infra.realtime?.eventSink?.eventsLast1m ?? 0);
     if (eventsLast1m === 0) {
       alerts.push({
         severity: 'warning',

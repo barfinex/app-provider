@@ -1,44 +1,40 @@
 import {
-    BidDepth as BinanceBidDepth,
-    Depth as BinanceDepth,
+  BidDepth as BinanceBidDepth,
+  Depth as BinanceDepth,
 } from 'binance-api-node';
 import {
-    MarketType,
-    OrderBookHandler,
-    DepthOrder,
-    Symbol,
+  MarketType,
+  OrderBookHandler,
+  DepthOrder,
+  TradingSymbol,
 } from '@barfinex/types';
 
 export function createOrderBookAdapter(context: any) {
-    return function orderBookAdapter(
-        marketType: MarketType,
-        handler: OrderBookHandler,
-    ) {
-        const self = context;
+  return function orderBookAdapter(
+    marketType: MarketType,
+    handler: OrderBookHandler,
+  ) {
+    const self = context;
 
-        function migrateData(
-            value: BinanceBidDepth,
-            result: DepthOrder[],
-        ) {
-            const price = parseFloat(value.price);
-            const qty = parseFloat(value.quantity);
-            if (qty !== 0) result.push({ price, volume: qty });
-        }
+    function migrateData(value: BinanceBidDepth, result: DepthOrder[]) {
+      const price = parseFloat(value.price);
+      const qty = parseFloat(value.quantity);
+      if (!Number.isFinite(price) || !(price > 0)) return;
+      if (!Number.isFinite(qty)) return;
+      // Keep zero-qty updates: they represent deletions in incremental depth streams.
+      result.push({ price, volume: qty });
+    }
 
-        return (msg: BinanceDepth) => {
-            const bids: DepthOrder[] = [];
-            const asks: DepthOrder[] = [];
-            const symbol: Symbol = { name: msg.symbol };
-            const time = msg.eventTime;
+    return (msg: BinanceDepth) => {
+      const bids: DepthOrder[] = [];
+      const asks: DepthOrder[] = [];
+      const symbol: TradingSymbol = { name: msg.symbol };
+      const time = msg.eventTime;
 
-            msg.bidDepth.forEach((item) => migrateData(item, bids));
-            msg.askDepth.forEach((item) => migrateData(item, asks));
+      msg.bidDepth.forEach((item) => migrateData(item, bids));
+      msg.askDepth.forEach((item) => migrateData(item, asks));
 
-            handler.call(
-                self,
-                marketType,
-                { bids, asks, symbol, time },
-            );
-        };
+      handler.call(self, marketType, { bids, asks, symbol, time });
     };
+  };
 }

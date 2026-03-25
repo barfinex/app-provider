@@ -25,11 +25,13 @@ import { EventSinkModule } from '../questdb/event-sink/event-sink.module';
 import { QuestDbIlpModule } from '../questdb/ilp/questdb-ilp.module';
 
 import { BinanceModule } from './datasource/binance/binance.module';
+import { OwnershipModule } from '../ownership/ownership.module';
 
 @Module({
   imports: [
     ConfigModule,
     KeyModule,
+    OwnershipModule,
     // EventEmitterModule.forRoot(),
 
     EventBusModule.forRoot({
@@ -79,4 +81,4 @@ import { BinanceModule } from './datasource/binance/binance.module';
     ConnectorBuilder,
   ],
 })
-export class ConnectorModule { }
+export class ConnectorModule {}

@@ -21,10 +21,7 @@ export interface CandleEntity {
 
 @Injectable()
 export class CandleRepository extends BaseRepository<CandleEntity> {
-  constructor(
-    writer: QuestDBWriteService,
-    reader: QuestDBQueryService,
-  ) {
+  constructor(writer: QuestDBWriteService, reader: QuestDBQueryService) {
     super('candles', writer, reader);
     this.channel = 'candles';
   }
@@ -34,7 +31,7 @@ export class CandleRepository extends BaseRepository<CandleEntity> {
 
     await this.writer.writeBatch(
       this.channel,
-      bars.map(b => ({
+      bars.map((b) => ({
         table: this.tableName,
         keys: {
           symbol: b.symbol,
@@ -50,7 +47,7 @@ export class CandleRepository extends BaseRepository<CandleEntity> {
           volume: b.volume,
         },
         timestampNs: BigInt(Math.trunc(b.ts) * 1_000_000),
-      }))
+      })),
     );
   }
 
@@ -63,7 +60,15 @@ export class CandleRepository extends BaseRepository<CandleEntity> {
     price: number;
     volumeDelta: number;
   }) {
-    const { symbol, interval, connectorType, marketType, ts, price, volumeDelta } = params;
+    const {
+      symbol,
+      interval,
+      connectorType,
+      marketType,
+      ts,
+      price,
+      volumeDelta,
+    } = params;
 
     this.writer.write(this.channel, {
       table: this.tableName,
@@ -98,7 +103,12 @@ export class CandleRepository extends BaseRepository<CandleEntity> {
     });
   }
 
-  async getRange(symbol: string, interval: TimeFrame, from: number, to: number) {
+  async getRange(
+    symbol: string,
+    interval: TimeFrame,
+    from: number,
+    to: number,
+  ) {
     symbol = symbol.replace(/'/g, "''");
     const intervalStr = String(interval).replace(/'/g, "''");
 
@@ -111,5 +121,4 @@ export class CandleRepository extends BaseRepository<CandleEntity> {
       ORDER BY ts ASC
     `);
   }
-
 }

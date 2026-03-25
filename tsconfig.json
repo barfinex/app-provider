@@ -1,48 +1,54 @@
 {
-  "extends": "./tsconfig.app.json",
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "composite": true,
-    "incremental": true
+    "rootDir": "src",
+    "outDir": "dist"
   },
   "include": [
     "src"
   ],
   "exclude": [
-    "src/mcp"
+    "dist",
+    "node_modules",
+    "**/*.spec.ts",
+    "**/*.test.ts",
+    "**/*.integration.ts",
+    "**/__tests__/**",
+    "**/__mocks__/**",
+    "test",
+    "src/test",
+    "**/fixtures/**"
   ],
   "references": [
     {
-      "path": "../../libs/types"
-    },
-    {
-      "path": "../../libs/utils"
-    },
-    {
-      "path": "../../libs/plugin-driver"
+      "path": "../../libs/config"
     },
     {
       "path": "../../libs/connectors"
     },
     {
-      "path": "../../libs/orders"
+      "path": "../../libs/detector"
+    },
+    {
+      "path": "../../libs/event-bus"
     },
     {
       "path": "../../libs/key"
     },
     {
-      "path": "../../libs/config"
+      "path": "../../libs/market-quality"
     },
     {
-      "path": "../../libs/telegram"
-    },
-    {
-      "path": "../../libs/detector"
+      "path": "../../libs/provider-mcp"
     },
     {
       "path": "../../libs/provider-ws-bridge"
     },
     {
-      "path": "../../libs/provider-mcp"
+      "path": "../../libs/types"
+    },
+    {
+      "path": "../../libs/diagnostics"
     }
   ]
 }

@@ -4,12 +4,14 @@ import { AppRegistryService } from './app-registry.service';
 import { AppRegistryRepository } from './app-registry.repository';
 import { QuestDBModule } from '../questdb/questdb.module';
 import { DetectorModule } from '../detector/detector.module';
+import { InspectorModule } from '../inspector/inspector.module';
 import { ConnectorModule } from '../connector/connector.module';
 
 @Module({
   imports: [
     QuestDBModule,
     forwardRef(() => DetectorModule),
+    forwardRef(() => InspectorModule),
     forwardRef(() => ConnectorModule),
   ],
   controllers: [AppRegistryController],

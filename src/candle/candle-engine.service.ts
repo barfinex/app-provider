@@ -4,82 +4,61 @@ import { TimeFrame } from '@barfinex/types';
 import { CandleCacheService, LiveCandle } from './candle-cache.service';
 import { CandleAggregatorService } from './candle-aggregator.service';
 import { CandleWriterService } from './candle-writer.service';
-import { DerivedCandleService } from './derived/derived-candle.service';
 
 @Injectable()
 export class CandleEngineService {
-    private readonly logger = new Logger(CandleEngineService.name);
+  private readonly logger = new Logger(CandleEngineService.name);
 
-    constructor(
-        private readonly cache: CandleCacheService,
-        private readonly aggregator: CandleAggregatorService,
-        private readonly writer: CandleWriterService,
-        private readonly derivedCandleService: DerivedCandleService,
-    ) { }
+  constructor(
+    private readonly cache: CandleCacheService,
+    private readonly aggregator: CandleAggregatorService,
+    private readonly writer: CandleWriterService,
+  ) {}
 
-    /**
-     * Основной вход: каждый трейд → обновление всех свечей.
-     */
-    onTrade(params: {
-        symbol: string;
-        price: number;
-        volume: number;
-        ts: number;
-        connectorType: string;
-        marketType: string;
-    }) {
-        const { symbol, price, volume, ts, connectorType, marketType } = params;
+  /**
+   * Основной вход: каждый трейд → обновление всех свечей.
+   */
+  onTrade(params: {
+    symbol: string;
+    price: number;
+    volume: number;
+    ts: number;
+    connectorType: string;
+    marketType: string;
+  }) {
+    const { symbol, price, volume, ts, connectorType, marketType } = params;
 
-        const baseTF = TimeFrame.min1;
+    const baseTF = TimeFrame.min1;
 
-        // === 1) Обновляем min1 свечу ===
-        const updated = this.cache.update(symbol, baseTF, price, volume, ts);
+    // === 1) Обновляем min1 свечу ===
+    const updated = this.cache.update(symbol, baseTF, price, volume, ts);
 
-        // === 2) Если min1 свеча закрылась → записываем и делаем cascade ===
-        if (updated.closed) {
-            const closed = updated.closed as LiveCandle;
+    // === 2) Если min1 свеча закрылась → записываем и делаем cascade ===
+    if (updated.closed) {
+      const closed = updated.closed as LiveCandle;
 
-            // 2.1) сохраняем закрытую min1 свечу
-            this.writer.writeCandle(
-                symbol,
-                baseTF,
-                closed,
-                connectorType,
-                marketType
-            );
+      // 2.1) сохраняем закрытую min1 свечу
+      this.writer.writeCandle(
+        symbol,
+        baseTF,
+        closed,
+        connectorType,
+        marketType,
+      );
 
-            // 2.2) каскадная агрегация (5m → 15m → 30m → …)
-            const cascade = this.aggregator.propagate(
-                symbol,
-                baseTF,
-                closed,
-                ts
-            );
+      // 2.2) каскадная агрегация (5m → 15m → 30m → …)
+      const cascade = this.aggregator.propagate(symbol, baseTF, closed, ts);
 
-            // 2.3) если закрылись родительские свечи — пишем и их
-            for (const item of cascade) {
-                this.writer.writeCandle(
-                    symbol,
-                    item.tf,
-                    item.candle,
-                    connectorType,
-                    marketType
-                );
-                if (item.tf === TimeFrame.day) {
-                    this.derivedCandleService
-                        .recomputeAffectedFromDailyClose({
-                            symbol,
-                            connectorType,
-                            marketType,
-                            dayTsMs: item.candle.start,
-                        })
-                        .catch((err) => {
-                            this.logger.warn(
-                                `[DERIVED] failed to recompute week/month for ${symbol}: ${err instanceof Error ? err.message : String(err)}`,
-                            );
-                        });
-                }
-            }
-        }
+      // 2.3) если закрылись родительские свечи — пишем и их
+      for (const item of cascade) {
+        this.writer.writeCandle(
+          symbol,
+          item.tf,
+          item.candle,
+          connectorType,
+          marketType,
+        );
+      }
     }
+  }
 }

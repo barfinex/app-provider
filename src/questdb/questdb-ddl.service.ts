@@ -1,4 +1,9 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { QuestDBQueryService } from './questdb-query.service';
 
@@ -24,11 +29,20 @@ export interface CandlesSuspendContext {
 const POST_INIT_WAL_CHECK_DELAY_MS = 10_000;
 
 /** Wait for QuestDB to accept connections before DDL. 0 = disabled. env: QUESTDB_READY_MAX_ATTEMPTS, QUESTDB_READY_INTERVAL_MS. */
-const READY_MAX_ATTEMPTS = Math.max(0, Number(process.env.QUESTDB_READY_MAX_ATTEMPTS ?? 30));
-const READY_INTERVAL_MS = Math.max(500, Number(process.env.QUESTDB_READY_INTERVAL_MS ?? 1000));
+const READY_MAX_ATTEMPTS = Math.max(
+  0,
+  Number(process.env.QUESTDB_READY_MAX_ATTEMPTS ?? 30),
+);
+const READY_INTERVAL_MS = Math.max(
+  500,
+  Number(process.env.QUESTDB_READY_INTERVAL_MS ?? 1000),
+);
 
 /** Delay before running DDL after ready (or after startup if ready disabled). env: QUESTDB_DDL_INITIAL_DELAY_MS. */
-const DDL_INITIAL_DELAY_MS = Math.max(0, Number(process.env.QUESTDB_DDL_INITIAL_DELAY_MS ?? 5000));
+const DDL_INITIAL_DELAY_MS = Math.max(
+  0,
+  Number(process.env.QUESTDB_DDL_INITIAL_DELAY_MS ?? 5000),
+);
 
 /** Retry whole DDL phase on transient errors (e.g. ECONNRESET). env: QUESTDB_DDL_PHASE_MAX_ATTEMPTS. */
 const DDL_PHASE_MAX_ATTEMPTS = Math.max(
@@ -42,7 +56,8 @@ const DDL_PHASE_BASE_MS = Math.max(
 );
 /** If true, on final DDL failure do not throw — schedule background retries until success. env: QUESTDB_DDL_DEFERRED_ON_FAIL. */
 const DDL_DEFERRED_ON_FAIL =
-  String(process.env.QUESTDB_DDL_DEFERRED_ON_FAIL || 'true').toLowerCase() === 'true';
+  String(process.env.QUESTDB_DDL_DEFERRED_ON_FAIL || 'true').toLowerCase() ===
+  'true';
 /** Interval (ms) for deferred DDL retries. env: QUESTDB_DDL_DEFERRED_INTERVAL_MS. */
 const DDL_DEFERRED_INTERVAL_MS = Math.max(
   5000,
@@ -65,11 +80,12 @@ function isRetriableConnectionError(e: unknown): boolean {
 @Injectable()
 export class QuestDBDDLService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(QuestDBDDLService.name);
-  private readonly isProduction = String(process.env.NODE_ENV || '').toLowerCase() === 'production';
+  private readonly isProduction =
+    String(process.env.NODE_ENV || '').toLowerCase() === 'production';
   private readonly stopOnWalSuspended =
     String(
-      process.env.QUESTDB_STOP_ON_WAL_SUSPENDED
-      || (this.isProduction ? 'true' : 'false'),
+      process.env.QUESTDB_STOP_ON_WAL_SUSPENDED ||
+        (this.isProduction ? 'true' : 'false'),
     ).toLowerCase() === 'true';
   private walSuspendedDetectedAt: number | null = null;
   private postInitWalCheckTimer: ReturnType<typeof setTimeout> | null = null;
@@ -78,6 +94,30 @@ export class QuestDBDDLService implements OnModuleInit, OnModuleDestroy {
   constructor(private readonly reader: QuestDBQueryService) {}
 
   async onModuleInit() {
+    const isDev =
+      String(process.env.NODE_ENV || '').toLowerCase() !== 'production';
+    if (isDev) {
+      // In dev: do not block listen() on QuestDB. Run DDL in background so HTTP server binds to port immediately (fixes ECONNREFUSED for Studio/MCP).
+      this.logger.log(
+        'Generating QuestDB tables (deferred in dev so HTTP server can bind)...',
+      );
+      setImmediate(() =>
+        this.runDdlFlow().catch((e) =>
+          this.logger.warn(
+            `QuestDB DDL (deferred) failed: ${
+              e instanceof Error ? e.message : String(e)
+            }`,
+          ),
+        ),
+      );
+      return;
+    }
+
+    await this.runDdlFlow();
+  }
+
+  /** Full DDL flow: wait for ready, delay, run phase, handle retries/deferred. */
+  private async runDdlFlow(): Promise<void> {
     this.logger.log('Generating QuestDB tables...');
 
     if (READY_MAX_ATTEMPTS > 0) {
@@ -85,7 +125,9 @@ export class QuestDBDDLService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (DDL_INITIAL_DELAY_MS > 0) {
-      this.logger.log(`Waiting ${DDL_INITIAL_DELAY_MS}ms before DDL (QUESTDB_DDL_INITIAL_DELAY_MS).`);
+      this.logger.log(
+        `Waiting ${DDL_INITIAL_DELAY_MS}ms before DDL (QUESTDB_DDL_INITIAL_DELAY_MS).`,
+      );
       await new Promise((r) => setTimeout(r, DDL_INITIAL_DELAY_MS));
     }
 
@@ -117,14 +159,22 @@ export class QuestDBDDLService implements OnModuleInit, OnModuleDestroy {
 
     if (DDL_DEFERRED_ON_FAIL) {
       this.logger.warn(
-        `QuestDB DDL failed after ${DDL_PHASE_MAX_ATTEMPTS} attempts (${lastError instanceof Error ? lastError.message : String(lastError)}). Deferred mode: will retry in background every ${DDL_DEFERRED_INTERVAL_MS / 1000}s until success.`,
+        `QuestDB DDL failed after ${DDL_PHASE_MAX_ATTEMPTS} attempts (${
+          lastError instanceof Error ? lastError.message : String(lastError)
+        }). Deferred mode: will retry in background every ${
+          DDL_DEFERRED_INTERVAL_MS / 1000
+        }s until success.`,
       );
       this.scheduleDeferredDdl();
       return;
     }
 
     this.logger.error(
-      `QuestDB DDL error after ${DDL_PHASE_MAX_ATTEMPTS} attempts: ${lastError instanceof Error ? (lastError as Error).message : String(lastError)}`,
+      `QuestDB DDL error after ${DDL_PHASE_MAX_ATTEMPTS} attempts: ${
+        lastError instanceof Error
+          ? (lastError as Error).message
+          : String(lastError)
+      }`,
     );
     throw lastError;
   }
@@ -134,7 +184,9 @@ export class QuestDBDDLService implements OnModuleInit, OnModuleDestroy {
     for (let attempt = 1; attempt <= READY_MAX_ATTEMPTS; attempt++) {
       try {
         await this.reader.query('SELECT 1');
-        this.logger.log(`QuestDB ready (attempt ${attempt}/${READY_MAX_ATTEMPTS}).`);
+        this.logger.log(
+          `QuestDB ready (attempt ${attempt}/${READY_MAX_ATTEMPTS}).`,
+        );
         return;
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -144,7 +196,9 @@ export class QuestDBDDLService implements OnModuleInit, OnModuleDestroy {
           );
           await new Promise((r) => setTimeout(r, READY_INTERVAL_MS));
         } else {
-          this.logger.warn(`QuestDB not ready after ${READY_MAX_ATTEMPTS} attempts: ${msg}. Proceeding with DDL (will retry on failure).`);
+          this.logger.warn(
+            `QuestDB not ready after ${READY_MAX_ATTEMPTS} attempts: ${msg}. Proceeding with DDL (will retry on failure).`,
+          );
         }
       }
     }
@@ -155,6 +209,13 @@ export class QuestDBDDLService implements OnModuleInit, OnModuleDestroy {
     await this.createCandlesTable();
     await this.tryResumeCandlesWal();
     await this.createTradesTable();
+    await this.createRawTradesTable();
+    await this.createTradeFeaturesTable();
+    await this.createOrderbookTopTable();
+    await this.createOrderbookSnapshotsTable();
+    await this.createOrderbookFeaturesTable();
+    await this.createHorizontalVolumeProfileTable();
+    await this.createLiquidityMapSnapshotTable();
     await this.createOrdersTable();
     await this.createOrderBookTable();
     await this.createSymbolsTable();
@@ -163,6 +224,9 @@ export class QuestDBDDLService implements OnModuleInit, OnModuleDestroy {
     await this.createInspectorsTable();
     await this.createAppRegistryTable();
     await this.createEventSinkTable();
+    await this.createCandleIntegrityIncidentsTable();
+    await this.createCandleIntegrityIncidentsCurrentTable();
+    await this.createCandleIntegrityEventsTable();
     this.logger.log('QuestDB schema ready');
   }
 
@@ -175,7 +239,9 @@ export class QuestDBDDLService implements OnModuleInit, OnModuleDestroy {
     }, POST_INIT_WAL_CHECK_DELAY_MS);
     if (POST_INIT_WAL_CHECK_DELAY_MS > 0) {
       this.logger.log(
-        `QuestDB: WAL re-check scheduled in ${POST_INIT_WAL_CHECK_DELAY_MS / 1000}s (candles recovery).`,
+        `QuestDB: WAL re-check scheduled in ${
+          POST_INIT_WAL_CHECK_DELAY_MS / 1000
+        }s (candles recovery).`,
       );
     }
   }
@@ -194,7 +260,9 @@ export class QuestDBDDLService implements OnModuleInit, OnModuleDestroy {
         })
         .catch((e) => {
           this.logger.warn(
-            `QuestDB deferred DDL retry failed: ${e instanceof Error ? e.message : String(e)}`,
+            `QuestDB deferred DDL retry failed: ${
+              e instanceof Error ? e.message : String(e)
+            }`,
           );
         });
     }, DDL_DEFERRED_INTERVAL_MS);
@@ -249,6 +317,35 @@ export class QuestDBDDLService implements OnModuleInit, OnModuleDestroy {
       PARTITION BY DAY
       WAL;
     `);
+    await this.ensureCandlesDedup();
+  }
+
+  /**
+   * Enable QuestDB deduplication for candles so ILP inserts with same
+   * (ts, symbol, interval, connectorType, marketType) replace previous row.
+   * Requires QuestDB 7.3+; no-op on older versions or if already enabled.
+   */
+  private async ensureCandlesDedup(): Promise<void> {
+    try {
+      await this.exec(
+        `ALTER TABLE candles DEDUP ENABLE UPSERT KEYS(ts, symbol, interval, connectorType, marketType)`,
+      );
+      this.logger.log('QuestDB candles: DEDUP ENABLE UPSERT KEYS applied.');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (
+        msg.includes('dedup') ||
+        msg.includes('DEDUP') ||
+        msg.includes('unexpected token') ||
+        msg.includes('not supported')
+      ) {
+        this.logger.warn(
+          `QuestDB candles: DEDUP not enabled (version or already set): ${msg}`,
+        );
+        return;
+      }
+      throw e;
+    }
   }
 
   async ensureCandlesTable() {
@@ -291,7 +388,9 @@ export class QuestDBDDLService implements OnModuleInit, OnModuleDestroy {
    * выходим только если RESUME не помог или таблица остаётся suspended.
    * lastWriteContext — данные последней записи, при suspend выводятся в лог.
    */
-  async checkCandlesSuspendedAndExitIfNeeded(lastWriteContext?: CandlesSuspendContext): Promise<void> {
+  async checkCandlesSuspendedAndExitIfNeeded(
+    lastWriteContext?: CandlesSuspendContext,
+  ): Promise<void> {
     try {
       const rows = await this.reader.queryAsObjects(
         `SELECT * FROM wal_tables() WHERE suspended = true`,
@@ -310,8 +409,12 @@ export class QuestDBDDLService implements OnModuleInit, OnModuleDestroy {
         );
       }
       console.error('wal_tables() row:', JSON.stringify(candlesRow, null, 2));
-      const errMsg = (candlesRow?.errorMessage ?? candlesRow?.error_message) as string | undefined;
-      const errTag = (candlesRow?.errorTag ?? candlesRow?.error_tag) as string | undefined;
+      const errMsg = (candlesRow?.errorMessage ?? candlesRow?.error_message) as
+        | string
+        | undefined;
+      const errTag = (candlesRow?.errorTag ?? candlesRow?.error_tag) as
+        | string
+        | undefined;
       if (errMsg) console.error('QuestDB errorMessage:', errMsg);
       if (errTag) console.error('QuestDB errorTag:', errTag);
       console.warn(
@@ -332,13 +435,10 @@ export class QuestDBDDLService implements OnModuleInit, OnModuleDestroy {
         Array.isArray(rowsAfter) &&
         rowsAfter.length > 0 &&
         rowsAfter.some(
-          (r: Record<string, unknown>) =>
-            nameCol(r) === 'candles',
+          (r: Record<string, unknown>) => nameCol(r) === 'candles',
         );
       if (stillSuspended) {
-        console.error(
-          'QuestDB: candles still suspended after RESUME WAL.',
-        );
+        console.error('QuestDB: candles still suspended after RESUME WAL.');
         this.exitOnSuspended(lastWriteContext);
       } else {
         this.markWalHealthy();
@@ -389,7 +489,8 @@ export class QuestDBDDLService implements OnModuleInit, OnModuleDestroy {
           rowsAfter.length > 0 &&
           rowsAfter.some(
             (r: Record<string, unknown>) =>
-              (r?.name ?? r?.table_name ?? '').toString().toLowerCase() === 'candles',
+              (r?.name ?? r?.table_name ?? '').toString().toLowerCase() ===
+              'candles',
           );
         if (stillSuspended) {
           console.error(
@@ -465,6 +566,217 @@ export class QuestDBDDLService implements OnModuleInit, OnModuleDestroy {
         side SYMBOL CAPACITY 8 CACHE,
         price DOUBLE,
         volume DOUBLE,
+        ts TIMESTAMP
+      ) timestamp(ts)
+      PARTITION BY DAY;
+    `);
+  }
+
+  // =====================================================================
+  // RAW TRADES (capture-once; WAL; retention enforced by grooming)
+  // =====================================================================
+  private async createRawTradesTable() {
+    await this.exec(`
+      CREATE TABLE IF NOT EXISTS raw_trades (
+        connectorType SYMBOL CAPACITY 32 CACHE,
+        marketType SYMBOL CAPACITY 32 CACHE,
+        symbol SYMBOL CAPACITY 256 CACHE,
+        tradeId SYMBOL CAPACITY 128 CACHE,
+        price DOUBLE,
+        qty DOUBLE,
+        side SYMBOL CAPACITY 16 CACHE,
+        aggressorSide SYMBOL CAPACITY 16 CACHE,
+        isBuyerMaker BOOLEAN,
+        eventTs LONG,
+        ingestTs LONG,
+        ts TIMESTAMP
+      ) timestamp(ts)
+      PARTITION BY DAY
+      WAL;
+    `);
+  }
+
+  // =====================================================================
+  // TRADE FEATURES (aggregated; long retention)
+  // =====================================================================
+  private async createTradeFeaturesTable() {
+    await this.exec(`
+      CREATE TABLE IF NOT EXISTS trade_features (
+        connectorType SYMBOL CAPACITY 32 CACHE,
+        marketType SYMBOL CAPACITY 32 CACHE,
+        symbol SYMBOL CAPACITY 256 CACHE,
+        window SYMBOL CAPACITY 32 CACHE,
+        tradeCount LONG,
+        buyVolume DOUBLE,
+        sellVolume DOUBLE,
+        signedVolume DOUBLE,
+        imbalance DOUBLE,
+        avgTradeSize DOUBLE,
+        maxTradeSize DOUBLE,
+        tapeSpeed DOUBLE,
+        vwap DOUBLE,
+        burstScore DOUBLE,
+        ts TIMESTAMP
+      ) timestamp(ts)
+      PARTITION BY DAY
+      WAL;
+    `);
+  }
+
+  // =====================================================================
+  // ORDERBOOK TOP-OF-BOOK + FEATURES (long retention)
+  // =====================================================================
+  private async createOrderbookTopTable() {
+    await this.exec(`
+      CREATE TABLE IF NOT EXISTS orderbook_top (
+        connectorType SYMBOL CAPACITY 32 CACHE,
+        marketType SYMBOL CAPACITY 32 CACHE,
+        symbol SYMBOL CAPACITY 256 CACHE,
+        bestBid DOUBLE,
+        bestAsk DOUBLE,
+        spread DOUBLE,
+        spreadBps DOUBLE,
+        midPrice DOUBLE,
+        microprice DOUBLE,
+        bidDepthTopN DOUBLE,
+        askDepthTopN DOUBLE,
+        depthImbalance DOUBLE,
+        liquidity1bps DOUBLE,
+        liquidity5bps DOUBLE,
+        bookPressure DOUBLE,
+        bookSlope DOUBLE,
+        lastBookTs LONG,
+        ts TIMESTAMP
+      ) timestamp(ts)
+      PARTITION BY DAY
+      WAL;
+    `);
+  }
+
+  // =====================================================================
+  // ORDERBOOK SNAPSHOTS (top-N; shorter retention)
+  // =====================================================================
+  private async createOrderbookSnapshotsTable() {
+    await this.exec(`
+      CREATE TABLE IF NOT EXISTS orderbook_snapshots (
+        connectorType SYMBOL CAPACITY 32 CACHE,
+        marketType SYMBOL CAPACITY 32 CACHE,
+        symbol SYMBOL CAPACITY 256 CACHE,
+        depthLevels INT,
+        snapshotJson STRING,
+        ts TIMESTAMP
+      ) timestamp(ts)
+      PARTITION BY DAY
+      WAL;
+    `);
+  }
+
+  // =====================================================================
+  // ORDERBOOK FEATURES (spread regime, depth, pressure, replenishment/depletion)
+  // =====================================================================
+  private async createOrderbookFeaturesTable() {
+    await this.exec(`
+      CREATE TABLE IF NOT EXISTS orderbook_features (
+        connectorType SYMBOL CAPACITY 32 CACHE,
+        marketType SYMBOL CAPACITY 32 CACHE,
+        symbol SYMBOL CAPACITY 256 CACHE,
+        spreadBps DOUBLE,
+        depthImbalance DOUBLE,
+        microprice DOUBLE,
+        liquidityTop1 DOUBLE,
+        liquidityTop5 DOUBLE,
+        liquidityTop10 DOUBLE,
+        bidPressure DOUBLE,
+        askPressure DOUBLE,
+        replenishmentSignal INT,
+        depletionSignal INT,
+        spreadWideningSignal INT,
+        ts TIMESTAMP
+      ) timestamp(ts)
+      PARTITION BY DAY
+      WAL;
+    `);
+  }
+
+  // =====================================================================
+  // HORIZONTAL VOLUME PROFILE
+  // =====================================================================
+  private async createHorizontalVolumeProfileTable() {
+    await this.exec(`
+      CREATE TABLE IF NOT EXISTS horizontal_volume_profile (
+        symbol SYMBOL CAPACITY 256 CACHE,
+        connectorType SYMBOL CAPACITY 32 CACHE,
+        marketType SYMBOL CAPACITY 32 CACHE,
+        scope SYMBOL CAPACITY 64 CACHE,
+        bucketSize DOUBLE,
+        tradeCount LONG,
+        buyVolume DOUBLE,
+        sellVolume DOUBLE,
+        totalVolume DOUBLE,
+        deltaVolume DOUBLE,
+        pocPrice DOUBLE,
+        valueAreaLow DOUBLE,
+        valueAreaHigh DOUBLE,
+        nearestHighAbove DOUBLE,
+        nearestHighBelow DOUBLE,
+        nearestLowAbove DOUBLE,
+        nearestLowBelow DOUBLE,
+        profileSkew DOUBLE,
+        concentrationScore DOUBLE,
+        localImbalance DOUBLE,
+        buySellDeltaAtCurrentRegion DOUBLE,
+        distanceToPocBps DOUBLE,
+        windowStart LONG,
+        windowEnd LONG,
+        levelsJson STRING,
+        ts TIMESTAMP
+      ) timestamp(ts)
+      PARTITION BY DAY;
+    `);
+  }
+
+  // =====================================================================
+  // LIQUIDITY MAP
+  // =====================================================================
+  private async createLiquidityMapSnapshotTable() {
+    await this.exec(`
+      CREATE TABLE IF NOT EXISTS liquidity_map_snapshot (
+        symbol SYMBOL CAPACITY 256 CACHE,
+        connectorType SYMBOL CAPACITY 32 CACHE,
+        marketType SYMBOL CAPACITY 32 CACHE,
+        scope SYMBOL CAPACITY 64 CACHE,
+        bucketSize DOUBLE,
+        pocPrice DOUBLE,
+        valueAreaLow DOUBLE,
+        valueAreaHigh DOUBLE,
+        distanceToPocBps DOUBLE,
+        distanceToValueAreaLowBps DOUBLE,
+        distanceToValueAreaHighBps DOUBLE,
+        nearestHvnAboveDistanceBps DOUBLE,
+        nearestHvnBelowDistanceBps DOUBLE,
+        nearestLvnAboveDistanceBps DOUBLE,
+        nearestLvnBelowDistanceBps DOUBLE,
+        nearestLiquidityWallAboveDistanceBps DOUBLE,
+        nearestLiquidityWallBelowDistanceBps DOUBLE,
+        strongestClusterAboveDistanceBps DOUBLE,
+        strongestClusterBelowDistanceBps DOUBLE,
+        localOrderbookImbalance DOUBLE,
+        localBidLiquidityDensity DOUBLE,
+        localAskLiquidityDensity DOUBLE,
+        thinZoneAboveDistanceBps DOUBLE,
+        thinZoneBelowDistanceBps DOUBLE,
+        liquidityPullVelocity DOUBLE,
+        liquidityAddVelocity DOUBLE,
+        liquidityConsumeVelocity DOUBLE,
+        liquidityInstabilityScore DOUBLE,
+        localAbsorptionScore DOUBLE,
+        localAggressionImbalance DOUBLE,
+        liquidityClusterConfluenceScore DOUBLE,
+        liquidityGapPressure DOUBLE,
+        profileOrderbookAlignmentScore DOUBLE,
+        currentPriceInValueArea DOUBLE,
+        topClustersJson STRING,
+        topGapsJson STRING,
         ts TIMESTAMP
       ) timestamp(ts)
       PARTITION BY DAY;
@@ -631,6 +943,109 @@ export class QuestDBDDLService implements OnModuleInit, OnModuleDestroy {
         marketType SYMBOL CAPACITY 32 CACHE,
         payload STRING,
         ts TIMESTAMP
+      ) timestamp(ts)
+      PARTITION BY DAY;
+    `);
+  }
+
+  // =====================================================================
+  // CANDLE INTEGRITY INCIDENTS (persistent, append-only; query LATEST BY incident_id)
+  // =====================================================================
+  private async createCandleIntegrityIncidentsTable() {
+    await this.exec(`
+      CREATE TABLE IF NOT EXISTS candle_integrity_incidents (
+        incident_id SYMBOL CAPACITY 256 CACHE,
+        updated_at TIMESTAMP,
+        status SYMBOL CAPACITY 32 CACHE,
+        severity SYMBOL CAPACITY 16 CACHE,
+        category SYMBOL CAPACITY 32 CACHE,
+        type SYMBOL CAPACITY 32 CACHE,
+        connectorType SYMBOL CAPACITY 32 CACHE,
+        marketType SYMBOL CAPACITY 32 CACHE,
+        symbol SYMBOL CAPACITY 256 CACHE,
+        interval SYMBOL CAPACITY 32 CACHE,
+        seriesKey SYMBOL CAPACITY 512 CACHE,
+        dataQualityScore INT,
+        autoRepairEligible BOOLEAN,
+        autoRepairAttempted BOOLEAN,
+        repairJobId SYMBOL CAPACITY 128 CACHE,
+        verifyJobId SYMBOL CAPACITY 128 CACHE,
+        summary STRING,
+        details STRING,
+        revision INT,
+        identity_key SYMBOL CAPACITY 512 CACHE,
+        impact_score DOUBLE,
+        detected_at_ms LONG,
+        resolved_at_ms LONG
+      ) timestamp(updated_at)
+      PARTITION BY DAY;
+    `);
+  }
+
+  // =====================================================================
+  // CANDLE INTEGRITY INCIDENTS CURRENT (snapshot: latest state per incident; dashboard/list use this)
+  // Same schema as history + audit fields. Append-only; query LATEST BY incident_id for hydration.
+  // =====================================================================
+  private async createCandleIntegrityIncidentsCurrentTable() {
+    await this.exec(`
+      CREATE TABLE IF NOT EXISTS candle_integrity_incidents_current (
+        incident_id SYMBOL CAPACITY 256 CACHE,
+        updated_at TIMESTAMP,
+        status SYMBOL CAPACITY 32 CACHE,
+        severity SYMBOL CAPACITY 16 CACHE,
+        category SYMBOL CAPACITY 32 CACHE,
+        type SYMBOL CAPACITY 32 CACHE,
+        connectorType SYMBOL CAPACITY 32 CACHE,
+        marketType SYMBOL CAPACITY 32 CACHE,
+        symbol SYMBOL CAPACITY 256 CACHE,
+        interval SYMBOL CAPACITY 32 CACHE,
+        seriesKey SYMBOL CAPACITY 512 CACHE,
+        dataQualityScore INT,
+        autoRepairEligible BOOLEAN,
+        autoRepairAttempted BOOLEAN,
+        repairJobId SYMBOL CAPACITY 128 CACHE,
+        verifyJobId SYMBOL CAPACITY 128 CACHE,
+        summary STRING,
+        details STRING,
+        revision INT,
+        identity_key SYMBOL CAPACITY 512 CACHE,
+        impact_score DOUBLE,
+        detected_at_ms LONG,
+        resolved_at_ms LONG,
+        scope SYMBOL CAPACITY 16 CACHE,
+        policy_decision SYMBOL CAPACITY 32 CACHE,
+        policy_reason STRING,
+        attempt_count INT,
+        last_attempt_at_ms LONG,
+        last_successful_repair_at_ms LONG,
+        last_successful_verify_at_ms LONG
+      ) timestamp(updated_at)
+      PARTITION BY DAY;
+    `);
+  }
+
+  // =====================================================================
+  // CANDLE INTEGRITY EVENTS (persistent, append-only)
+  // =====================================================================
+  private async createCandleIntegrityEventsTable() {
+    await this.exec(`
+      CREATE TABLE IF NOT EXISTS candle_integrity_events (
+        ts TIMESTAMP,
+        eventType SYMBOL CAPACITY 64 CACHE,
+        level SYMBOL CAPACITY 16 CACHE,
+        incidentId SYMBOL CAPACITY 256 CACHE,
+        jobId SYMBOL CAPACITY 128 CACHE,
+        connectorType SYMBOL CAPACITY 32 CACHE,
+        marketType SYMBOL CAPACITY 32 CACHE,
+        symbol SYMBOL CAPACITY 256 CACHE,
+        interval SYMBOL CAPACITY 32 CACHE,
+        message STRING,
+        payload STRING,
+        error STRING,
+        durationMs INT,
+        previousEventId SYMBOL CAPACITY 256 CACHE,
+        rootIncidentId SYMBOL CAPACITY 256 CACHE,
+        event_id SYMBOL CAPACITY 256 CACHE
       ) timestamp(ts)
       PARTITION BY DAY;
     `);

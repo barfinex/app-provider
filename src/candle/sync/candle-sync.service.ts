@@ -1,7 +1,13 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { ConnectorType, MarketType, Symbol, TimeFrame } from '@barfinex/types';
+import {
+  ALL_CANDLE_INTERVALS,
+  ConnectorType,
+  MarketType,
+  TradingSymbol,
+  TimeFrame,
+} from '@barfinex/types';
 import { ConfigService } from '@barfinex/config';
 
 import { HistoryLoaderService } from '../history/history-loader.service';
@@ -13,7 +19,7 @@ import { QuestDBDDLService } from '../../questdb/questdb-ddl.service';
 import { QuestDBQueryService } from '../../questdb/questdb-query.service';
 import { DAY, ms } from '../time/time.utils';
 import { CANDLE_SUBSCRIPTIONS_UPDATED } from '../../common/constants';
-import { DerivedCandleService } from '../derived/derived-candle.service';
+import { ProviderOwnershipService } from '../../ownership/provider-ownership.service';
 
 /** Payload when connector subscription set is updated (startup or dynamic add). */
 export { CANDLE_SUBSCRIPTIONS_UPDATED };
@@ -21,14 +27,14 @@ export { CANDLE_SUBSCRIPTIONS_UPDATED };
 export interface CandleSubscriptionsUpdatedPayload {
   connectorType: ConnectorType;
   marketType: MarketType;
-  symbols: Symbol[];
+  symbols: TradingSymbol[];
   intervals: TimeFrame[];
 }
 
 interface StoredSubscription {
   connectorType: ConnectorType;
   marketType: MarketType;
-  symbols: Symbol[];
+  symbols: TradingSymbol[];
   intervals: TimeFrame[];
 }
 
@@ -69,7 +75,6 @@ export class CandleSyncService implements OnModuleInit {
   private readonly warmupVerbose = this.candleVerbose;
   private readonly warmupIntervalLogs = this.candleVerbose;
   private readonly backfillVerbose = this.candleVerbose;
-  private readonly derivedVerbose = this.candleVerbose;
   private static readonly DEFAULT_LOOKBACK_DAYS: Record<TimeFrame, number> = {
     [TimeFrame.min1]: 30,
     [TimeFrame.min5]: 90,
@@ -79,8 +84,6 @@ export class CandleSyncService implements OnModuleInit {
     [TimeFrame.h2]: 120,
     [TimeFrame.h4]: 120,
     [TimeFrame.day]: 540,
-    [TimeFrame.week]: 540,
-    [TimeFrame.month]: 540,
   };
 
   /** connectorType:marketType -> subscription set */
@@ -110,12 +113,8 @@ export class CandleSyncService implements OnModuleInit {
     private readonly warmupGate: CandleWarmupGateService,
     private readonly ddlService: QuestDBDDLService,
     private readonly questDbQueryService: QuestDBQueryService,
-    private readonly derivedCandleService: DerivedCandleService,
+    private readonly ownershipService: ProviderOwnershipService,
   ) {}
-
-  private isDerivedInterval(interval: TimeFrame): interval is TimeFrame.week | TimeFrame.month {
-    return interval === TimeFrame.week || interval === TimeFrame.month;
-  }
 
   private warmupLog(message: string): void {
     if (this.warmupVerbose) this.logger.log(message);
@@ -131,10 +130,6 @@ export class CandleSyncService implements OnModuleInit {
 
   private backfillDebug(message: string): void {
     if (this.backfillVerbose) this.logger.debug(message);
-  }
-
-  private derivedLog(message: string): void {
-    if (this.derivedVerbose) this.logger.log(message);
   }
 
   private parsePositiveInt(value: unknown): number | null {
@@ -167,16 +162,23 @@ export class CandleSyncService implements OnModuleInit {
     return 2;
   }
 
-  private expectedCandlesCount(interval: TimeFrame, fromMs: number, toMs: number): number {
+  private expectedCandlesCount(
+    interval: TimeFrame,
+    fromMs: number,
+    toMs: number,
+  ): number {
     const intervalMs = ms(interval);
     if (!Number.isFinite(intervalMs) || intervalMs <= 0) return 0;
     if (toMs < fromMs) return 0;
-    return Math.floor((toMs - fromMs) / intervalMs) + 1;
+    const alignedTo = Math.floor(toMs / intervalMs) * intervalMs;
+    if (alignedTo < fromMs) return 0;
+    return Math.floor((alignedTo - fromMs) / intervalMs) + 1;
   }
 
   async onModuleInit(): Promise<void> {
     const clearHistoryOnStartup =
-      this.configService.getConfig()?.provider?.candleSync?.clearHistoryOnStartup === true;
+      this.configService.getConfig()?.provider?.candleSync
+        ?.clearHistoryOnStartup === true;
 
     if (!clearHistoryOnStartup || this.hasTruncatedThisRun) return;
 
@@ -187,16 +189,24 @@ export class CandleSyncService implements OnModuleInit {
         'Candles table truncated (clearHistoryOnStartup). Warmup will run when subscriptions are ready.',
       );
     } catch (err) {
-      this.logger.error('Failed to truncate candles table (clearHistoryOnStartup)', err as any);
+      this.logger.error(
+        'Failed to truncate candles table (clearHistoryOnStartup)',
+        err as any,
+      );
     }
   }
 
   private isConnectorSupported(connectorType: ConnectorType): boolean {
-    return connectorType === ConnectorType.binance || connectorType === ConnectorType.alpaca;
+    return (
+      connectorType === ConnectorType.binance ||
+      connectorType === ConnectorType.alpaca
+    );
   }
 
   private createWarmupOpId(): string {
-    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`.toUpperCase();
+    return `${Date.now().toString(36)}-${Math.random()
+      .toString(36)
+      .slice(2, 8)}`.toUpperCase();
   }
 
   private warmupPrefix(meta: WarmupLogMeta): string {
@@ -206,7 +216,7 @@ export class CandleSyncService implements OnModuleInit {
     )} connectorType=${ctx.connectorType} marketType=${ctx.marketType}]`;
   }
 
-  private filterWarmupSymbols(symbols: Symbol[]): Symbol[] {
+  private filterWarmupSymbols(symbols: TradingSymbol[]): TradingSymbol[] {
     const skip = new Set<string>(['USDT', 'BUSD', 'USDC', 'FDUSD', 'TUSD']);
     return symbols.filter((s) => {
       const name = (typeof s === 'string' ? s : s.name || '').toUpperCase();
@@ -221,10 +231,14 @@ export class CandleSyncService implements OnModuleInit {
   }
 
   @OnEvent(CANDLE_SUBSCRIPTIONS_UPDATED)
-  async onSubscriptionsUpdated(payload: CandleSubscriptionsUpdatedPayload): Promise<void> {
+  async onSubscriptionsUpdated(
+    payload: CandleSubscriptionsUpdatedPayload,
+  ): Promise<void> {
     if (!payload?.symbols?.length || !payload?.intervals?.length) {
       this.logger.warn(
-        `Candle sync skipped: no symbols or intervals (symbols=${payload?.symbols?.length ?? 0}, intervals=${payload?.intervals?.length ?? 0})`,
+        `Candle sync skipped: no symbols or intervals (symbols=${
+          payload?.symbols?.length ?? 0
+        }, intervals=${payload?.intervals?.length ?? 0})`,
       );
       return;
     }
@@ -232,14 +246,32 @@ export class CandleSyncService implements OnModuleInit {
     const { connectorType, marketType, symbols, intervals } = payload;
 
     if (!this.isConnectorSupported(connectorType)) {
-      this.logger.debug(`Candle sync skipped for unsupported connector: ${connectorType}`);
+      this.logger.debug(
+        `Candle sync skipped for unsupported connector: ${connectorType}`,
+      );
       return;
     }
 
     const symbolsFiltered = this.filterWarmupSymbols(symbols);
     if (symbolsFiltered.length < symbols.length) {
       this.logger.debug(
-        `Warmup: skipped ${symbols.length - symbolsFiltered.length} non-tradeable symbols (e.g. USDT alone)`,
+        `Warmup: skipped ${
+          symbols.length - symbolsFiltered.length
+        } non-tradeable symbols (e.g. USDT alone)`,
+      );
+    }
+
+    const supportedIntervals = intervals.filter((tf) =>
+      ALL_CANDLE_INTERVALS.includes(tf),
+    );
+    if (supportedIntervals.length < intervals.length) {
+      const dropped = intervals.filter(
+        (tf) => !ALL_CANDLE_INTERVALS.includes(tf),
+      );
+      this.logger.warn(
+        `Candle sync: dropping unsupported intervals (e.g. week) intervals=${dropped.join(
+          ',',
+        )} supported=${ALL_CANDLE_INTERVALS.join(',')}`,
       );
     }
 
@@ -249,7 +281,9 @@ export class CandleSyncService implements OnModuleInit {
       connectorType,
       marketType,
       symbols: [...symbolsFiltered],
-      intervals: [...intervals],
+      intervals: supportedIntervals.length
+        ? supportedIntervals
+        : [TimeFrame.min1],
     });
 
     if (this.warmupRunningKeys.has(key)) {
@@ -267,6 +301,18 @@ export class CandleSyncService implements OnModuleInit {
     const sub = this.state.get(key);
     if (!sub) return;
 
+    const { connectorType, marketType, symbols, intervals } = sub;
+    if (
+      !this.ownershipService.isActiveOwnerForConnectorMarket(
+        connectorType,
+        marketType,
+      )
+    ) {
+      this.logger.warn(`Warmup skipped: no ownership for scope=${key}`);
+      this.warmupGate.setWarmupCompleted(true);
+      return;
+    }
+
     // 🔒 Ждём если другой warmup уже идёт
     while (this.warmupGlobalRunning) {
       await new Promise((r) => setTimeout(r, 200));
@@ -276,9 +322,11 @@ export class CandleSyncService implements OnModuleInit {
     this.warmupRunningKeys.add(key);
     this.warmupQueuedKeys.delete(key);
     this.warmupGate.setWarmupCompleted(false);
-
-    const { connectorType, marketType, symbols, intervals } = sub;
-    this.warmupGate.setWarmupRunning(String(connectorType), String(marketType), true);
+    this.warmupGate.setWarmupRunning(
+      String(connectorType),
+      String(marketType),
+      true,
+    );
 
     try {
       this.logger.log(
@@ -287,13 +335,19 @@ export class CandleSyncService implements OnModuleInit {
 
       await this.runWarmup(connectorType, marketType, symbols, intervals);
     } finally {
-      this.warmupGate.setWarmupRunning(String(connectorType), String(marketType), false);
+      this.warmupGate.setWarmupRunning(
+        String(connectorType),
+        String(marketType),
+        false,
+      );
       this.warmupRunningKeys.delete(key);
       this.warmupGlobalRunning = false;
     }
 
     if (this.warmupQueuedKeys.has(key)) {
-      this.logger.log(`Warmup queued rerun detected for ${key}. Restarting warmup.`);
+      this.logger.log(
+        `Warmup queued rerun detected for ${key}. Restarting warmup.`,
+      );
       await this.startWarmupForKey(key);
     }
   }
@@ -304,9 +358,16 @@ export class CandleSyncService implements OnModuleInit {
   private async warmupOneSymbolInterval(
     connectorType: ConnectorType,
     marketType: MarketType,
-    s: Symbol,
+    s: TradingSymbol,
     interval: TimeFrame,
-    requestFn: ((from: number, to: number, symbol: string, interval: TimeFrame) => Promise<unknown>) | null,
+    requestFn:
+      | ((
+          from: number,
+          to: number,
+          symbol: string,
+          interval: TimeFrame,
+        ) => Promise<unknown>)
+      | null,
     now: number,
     lookbackDays: number,
   ): Promise<void> {
@@ -334,38 +395,26 @@ export class CandleSyncService implements OnModuleInit {
       const lastTs = coverage.maxTsMs;
       const firstTs = coverage.minTsMs;
       const lookbackFrom = Math.max(0, now - lookbackDays * DAY);
-      const expectedCount = this.isDerivedInterval(ctx.tf)
-        ? 0
-        : this.expectedCandlesCount(ctx.tf, lookbackFrom, now);
+      const expectedCount = this.expectedCandlesCount(
+        ctx.tf,
+        lookbackFrom,
+        now,
+      );
 
       if (lastTs != null && requestFn) {
-        if (this.isDerivedInterval(ctx.tf)) {
-          this.derivedLog(
-            `${logPrefix} [DERIVED] Weekly/monthly candles will be computed internally`,
-          );
-          const lookbackMs = lookbackDays * DAY;
-          const from = Math.max(0, now - lookbackMs);
-          const rows = await this.derivedCandleService.recomputeRangeFromDaily({
-            symbol: ctx.symbol,
-            connectorType: ctx.connectorType,
-            marketType: ctx.marketType,
-            interval: ctx.tf,
-            fromMs: from,
-            toMs: now,
-          });
-          this.warmupLog(`${logPrefix} [DERIVED] updated candles=${rows}`);
-          return;
-        }
-
         if (
           firstTs != null &&
           (firstTs > lookbackFrom || coverage.count < expectedCount)
         ) {
           const backfillTo = Math.max(lookbackFrom, firstTs - ms(ctx.tf));
           this.warmupLog(
-            `${logPrefix} coverage check: expected=${expectedCount}, actual=${coverage.count}, firstTs=${new Date(
+            `${logPrefix} coverage check: expected=${expectedCount}, actual=${
+              coverage.count
+            }, firstTs=${new Date(
               firstTs,
-            ).toISOString()}, targetFrom=${new Date(lookbackFrom).toISOString()} -> backfill older range`,
+            ).toISOString()}, targetFrom=${new Date(
+              lookbackFrom,
+            ).toISOString()} -> backfill older range`,
           );
           if (lookbackFrom <= backfillTo) {
             const backfilled = await this.symbolHistory.loadForSymbol({
@@ -386,7 +435,10 @@ export class CandleSyncService implements OnModuleInit {
 
         const intervalMs = ms(ctx.tf);
         const overlapCandles = this.getOverlapCandles();
-        const from = Math.max(lookbackFrom, lastTs - overlapCandles * intervalMs);
+        const from = Math.max(
+          lookbackFrom,
+          lastTs - overlapCandles * intervalMs,
+        );
         if (from >= now) {
           this.warmupDebug(`${logPrefix} already up to date, skip`);
           return;
@@ -403,25 +455,11 @@ export class CandleSyncService implements OnModuleInit {
           logMeta: meta,
         });
         this.warmupLog(
-          `${logPrefix} extended from ${new Date(lastTs).toISOString()}, candles=${candles.length}`,
+          `${logPrefix} extended from ${new Date(
+            lastTs,
+          ).toISOString()}, candles=${candles.length}`,
         );
       } else {
-        if (this.isDerivedInterval(ctx.tf)) {
-          this.derivedLog(
-            `${logPrefix} [DERIVED] Weekly/monthly candles will be computed internally`,
-          );
-          const from = now - lookbackDays * DAY;
-          const rows = await this.derivedCandleService.recomputeRangeFromDaily({
-            symbol: ctx.symbol,
-            connectorType: ctx.connectorType,
-            marketType: ctx.marketType,
-            interval: ctx.tf,
-            fromMs: from,
-            toMs: now,
-          });
-          this.warmupLog(`${logPrefix} [DERIVED] history loaded, candles=${rows}`);
-          return;
-        }
         const candles = await this.historyLoader.getHistory({
           connectorType: ctx.connectorType as ConnectorType,
           marketType: ctx.marketType as MarketType,
@@ -431,11 +469,15 @@ export class CandleSyncService implements OnModuleInit {
           gapDays: 0,
           logMeta: meta,
         });
-        this.warmupLog(`${logPrefix} history loaded, candles=${candles.length}`);
+        this.warmupLog(
+          `${logPrefix} history loaded, candles=${candles.length}`,
+        );
       }
     } catch (err) {
       this.logger.warn(
-        `${logPrefix} skipped: ${err instanceof Error ? err.message : String(err)}`,
+        `${logPrefix} skipped: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
       );
     }
   }
@@ -443,7 +485,7 @@ export class CandleSyncService implements OnModuleInit {
   private async runWarmup(
     connectorType: ConnectorType,
     marketType: MarketType,
-    symbols: Symbol[],
+    symbols: TradingSymbol[],
     intervals: TimeFrame[],
     warmupDaysOverride?: number, // legacy compatibility; prefer per-interval lookback
   ): Promise<void> {
@@ -455,7 +497,14 @@ export class CandleSyncService implements OnModuleInit {
     await this.questDbQueryService.ensureWalHealthy('candles');
 
     const now = Date.now();
-    let requestFn: ((from: number, to: number, symbol: string, interval: TimeFrame) => Promise<unknown>) | null = null;
+    let requestFn:
+      | ((
+          from: number,
+          to: number,
+          symbol: string,
+          interval: TimeFrame,
+        ) => Promise<unknown>)
+      | null = null;
     try {
       requestFn = this.requestFactory.create(connectorType, marketType);
     } catch {
@@ -472,14 +521,16 @@ export class CandleSyncService implements OnModuleInit {
     );
     if (warmupIntervals.length === 0) {
       this.logger.warn(
-        `[CandleWarmup] skipped_no_warmup_intervals configured=${intervals.join(',') || 'none'} allowed=${CandleSyncService.WARMUP_INTERVALS.join(',')}`,
+        `[CandleWarmup] skipped_no_warmup_intervals configured=${
+          intervals.join(',') || 'none'
+        } allowed=${CandleSyncService.WARMUP_INTERVALS.join(',')}`,
       );
       this.warmupGate.setWarmupCompleted(true);
       return;
     }
 
     const tasks: Array<{
-      symbol: Symbol;
+      symbol: TradingSymbol;
       interval: TimeFrame;
       lookbackDays: number;
     }> = [];
@@ -494,11 +545,6 @@ export class CandleSyncService implements OnModuleInit {
           `[Warmup] lookbackDays=${lookbackDays} interval=${interval} connector=${connectorType} market=${marketType}`,
         );
       }
-      if (this.isDerivedInterval(interval)) {
-        this.derivedLog(
-          `[DERIVED] interval=${interval} skip external backfill, use local aggregation`,
-        );
-      }
       for (const s of symbols) {
         tasks.push({ symbol: s, interval, lookbackDays });
       }
@@ -506,7 +552,9 @@ export class CandleSyncService implements OnModuleInit {
 
     const totalTasks = tasks.length;
     const workers = Math.max(1, CandleSyncService.WARMUP_WORKERS);
-    this.logger.log(`[CandleWarmup] queue_size=${totalTasks} workers=${workers}`);
+    this.logger.log(
+      `[CandleWarmup] queue_size=${totalTasks} workers=${workers}`,
+    );
     if (totalTasks > CandleSyncService.WARMUP_TASK_WARN_LIMIT) {
       this.logger.warn(
         `[CandleWarmupProtection] task_count_exceeds_limit tasks=${totalTasks} limit=${CandleSyncService.WARMUP_TASK_WARN_LIMIT}`,
@@ -522,7 +570,8 @@ export class CandleSyncService implements OnModuleInit {
         if (taskIndex >= totalTasks) return;
 
         const task = tasks[taskIndex];
-        const symbolName = typeof task.symbol === 'string' ? task.symbol : task.symbol.name;
+        const symbolName =
+          typeof task.symbol === 'string' ? task.symbol : task.symbol.name;
         progress += 1;
         this.logger.log(
           `[CandleWarmup] symbol=${symbolName} interval=${task.interval} task=${progress}/${totalTasks}`,
@@ -580,54 +629,45 @@ export class CandleSyncService implements OnModuleInit {
     const now = Date.now();
     for (const [, sub] of this.state) {
       const { connectorType, marketType, symbols, intervals } = sub;
+      const safeIntervals = intervals.filter((tf) =>
+        ALL_CANDLE_INTERVALS.includes(tf),
+      );
+      if (safeIntervals.length === 0) continue;
 
-      let requestFn: (from: number, to: number, symbol: string, interval: TimeFrame) => Promise<unknown>;
+      let requestFn: (
+        from: number,
+        to: number,
+        symbol: string,
+        interval: TimeFrame,
+      ) => Promise<unknown>;
       try {
         requestFn = this.requestFactory.create(connectorType, marketType);
       } catch {
         continue;
       }
 
-      for (const interval of intervals) {
+      for (const interval of safeIntervals) {
         const lookbackDays = this.getLookbackDays(interval);
         const overlapCandles = this.getOverlapCandles();
-        const intervalMs = this.isDerivedInterval(interval) ? DAY : ms(interval);
+        const intervalMs = ms(interval);
         this.backfillLog(
           `[Backfill] lookbackDays=${lookbackDays} interval=${interval} connector=${connectorType} market=${marketType}`,
         );
-        if (this.isDerivedInterval(interval)) {
-          this.derivedLog(
-            `[DERIVED] interval=${interval} skip external backfill, use local aggregation`,
-          );
-        }
 
         for (const s of symbols) {
           const symbolName = typeof s === 'string' ? s : s.name;
           if (!symbolName) continue;
 
           try {
+            this.backfillLog(
+              `HISTORY_BACKFILL_START symbol=${symbolName} interval=${interval} connector=${connectorType} market=${marketType}`,
+            );
             const lastTs = await this.candleQuery.loadLastTimestamp({
               symbol: symbolName,
               connectorType: String(connectorType),
               marketType: String(marketType),
               interval,
             });
-
-            if (this.isDerivedInterval(interval)) {
-              const fromDerived =
-                lastTs != null
-                  ? Math.max(0, lastTs - lookbackDays * DAY)
-                  : now - lookbackDays * DAY;
-              await this.derivedCandleService.recomputeRangeFromDaily({
-                symbol: symbolName,
-                connectorType: String(connectorType),
-                marketType: String(marketType),
-                interval,
-                fromMs: fromDerived,
-                toMs: now,
-              });
-              continue;
-            }
 
             const from =
               lastTs == null
@@ -645,11 +685,18 @@ export class CandleSyncService implements OnModuleInit {
               to: now,
               requestFn,
               minTimeExclusive:
-                lastTs != null ? Math.max(0, lastTs - overlapCandles * intervalMs) : undefined,
+                lastTs != null
+                  ? Math.max(0, lastTs - overlapCandles * intervalMs)
+                  : undefined,
             });
 
             this.backfillDebug(
-              `Backfill ${symbolName} ${interval}: from ${new Date(from).toISOString()} to now`,
+              `Backfill ${symbolName} ${interval}: from ${new Date(
+                from,
+              ).toISOString()} to now`,
+            );
+            this.backfillLog(
+              `HISTORY_BACKFILL_COMPLETE symbol=${symbolName} interval=${interval} connector=${connectorType} market=${marketType}`,
             );
           } catch (err) {
             this.logger.warn(

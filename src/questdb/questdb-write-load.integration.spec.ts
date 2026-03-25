@@ -37,13 +37,16 @@ describe('QuestDBWriteService (load/integration)', () => {
     coalesceWindowMs?: string;
   }): Promise<QuestDBWriteService> {
     if (overrides?.queueSize != null) {
-      process.env.PROVIDER_QUESTDB_WRITE_QUEUE_SIZE = String(overrides.queueSize);
+      process.env.PROVIDER_QUESTDB_WRITE_QUEUE_SIZE = String(
+        overrides.queueSize,
+      );
     }
     if (overrides?.hardLimit != null) {
       process.env.QUESTDB_BUFFER_HARD_LIMIT = String(overrides.hardLimit);
     }
     if (overrides?.coalesceWindowMs != null) {
-      process.env.PROVIDER_QUESTDB_COALESCE_WINDOW_MS = overrides.coalesceWindowMs;
+      process.env.PROVIDER_QUESTDB_COALESCE_WINDOW_MS =
+        overrides.coalesceWindowMs;
     }
     const svc = new QuestDBWriteService();
     await svc.onModuleInit();

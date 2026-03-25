@@ -14,28 +14,21 @@ import { EventSinkModule } from '../questdb/event-sink/event-sink.module';
 import { QuestDbIlpModule } from '../questdb/ilp/questdb-ilp.module';
 
 @Module({
-    imports: [
-        ConnectorModule,
+  imports: [
+    ConnectorModule,
 
-        // ОБЯЗАТЕЛЬНЫЕ МОДУЛИ
-        QuestDBModule,                    // → QuestDBQueryService
-        forwardRef(() => EventSinkModule), // → EventSinkRepository
+    // ОБЯЗАТЕЛЬНЫЕ МОДУЛИ
+    QuestDBModule, // → QuestDBQueryService
+    forwardRef(() => EventSinkModule), // → EventSinkRepository
 
-        // 🔥 ДОБАВЛЕНО: ILP Writer (QuestDbIlpWriterService)
-        QuestDbIlpModule,
-    ],
+    // 🔥 ДОБАВЛЕНО: ILP Writer (QuestDbIlpWriterService)
+    QuestDbIlpModule,
+  ],
 
-    controllers: [SymbolController],
+  controllers: [SymbolController],
 
-    providers: [
-        SymbolService,
-        SymbolRepository,
-        SymbolEventAdapter,
-    ],
+  providers: [SymbolService, SymbolRepository, SymbolEventAdapter],
 
-    exports: [
-        SymbolService,
-        SymbolRepository,
-    ],
+  exports: [SymbolService, SymbolRepository],
 })
-export class SymbolModule { }
+export class SymbolModule {}

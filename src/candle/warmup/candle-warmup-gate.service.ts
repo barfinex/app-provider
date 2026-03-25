@@ -24,7 +24,11 @@ export class CandleWarmupGateService {
     return `${connectorType}:${marketType}`;
   }
 
-  setWarmupRunning(connectorType: string, marketType: string, running: boolean): void {
+  setWarmupRunning(
+    connectorType: string,
+    marketType: string,
+    running: boolean,
+  ): void {
     const k = this.key(connectorType, marketType);
     if (running) {
       this.runningKeys.add(k);

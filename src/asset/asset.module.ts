@@ -10,14 +10,14 @@ import { OrderModule } from '../order/order.module';
 import { DetectorModule } from '../detector/detector.module';
 
 @Module({
-    imports: [
-        forwardRef(() => ConnectorModule),
-        forwardRef(() => AccountModule),
-        forwardRef(() => OrderModule),
-        forwardRef(() => DetectorModule),
-    ],
-    controllers: [AssetController],
-    providers: [AssetService],
-    exports: [AssetService],
+  imports: [
+    forwardRef(() => ConnectorModule),
+    forwardRef(() => AccountModule),
+    forwardRef(() => OrderModule),
+    forwardRef(() => DetectorModule),
+  ],
+  controllers: [AssetController],
+  providers: [AssetService],
+  exports: [AssetService],
 })
-export class AssetModule { }
+export class AssetModule {}

@@ -2,7 +2,12 @@ import { Injectable, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { lastValueFrom } from 'rxjs';
 import { AxiosRequestConfig } from 'axios';
-import { ProxyAppType, ProxyForwardResult, ProxyTarget } from './proxy.types';
+import {
+  AppStatus,
+  ProxyAppType,
+  ProxyForwardResult,
+  ProxyTarget,
+} from './proxy.types';
 import { AppRegistryService } from '../app-registry/app-registry.service';
 
 @Injectable()
@@ -19,11 +24,16 @@ export class ProxyService {
       appType: type,
       includeInactive: true,
     });
-    return rows.map(r => ({
+    return rows.map((r) => ({
       key: r.appKey,
       type: r.appType,
       baseUrl: r.baseUrl,
       enabled: r.isActive,
+      status: (r.status === 'unregistered'
+        ? 'unregistered'
+        : r.isActive
+        ? 'active'
+        : 'offline') as ProxyTarget['status'],
       source: 'db',
     }));
   }
@@ -51,14 +61,24 @@ export class ProxyService {
     };
 
     const response = await lastValueFrom(this.httpService.request(axiosConfig));
+    if (response.status >= 500) {
+      this.logger.warn(
+        `Upstream error: ${method} ${url} → HTTP ${response.status}`,
+      );
+    }
     return {
       status: response.status,
       data: response.data,
-      headers: this.pickResponseHeaders(response.headers as Record<string, unknown>),
+      headers: this.pickResponseHeaders(
+        response.headers as Record<string, unknown>,
+      ),
     };
   }
 
-  private async resolveTarget(type: ProxyAppType, key: string): Promise<ProxyTarget> {
+  private async resolveTarget(
+    type: ProxyAppType,
+    key: string,
+  ): Promise<ProxyTarget> {
     const normalizedKey = key.trim();
     const resolved = await this.appRegistryService.resolveActiveTarget(
       type,
@@ -69,6 +89,7 @@ export class ProxyService {
       type: resolved.appType,
       baseUrl: resolved.baseUrl,
       enabled: true,
+      status: 'active' as AppStatus,
       source: 'db',
     };
   }
@@ -114,7 +135,7 @@ export class ProxyService {
       }
       if (value === undefined || value === null) continue;
       headers[key] = Array.isArray(value)
-        ? value.map(v => String(v)).join(', ')
+        ? value.map((v) => String(v)).join(', ')
         : String(value);
     }
     return headers;

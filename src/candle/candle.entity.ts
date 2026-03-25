@@ -19,7 +19,6 @@
 //     @Column()
 //     time!: number;
 
-
 //     @ManyToOne(type => CandleMetadataEntity, candleMetadata => candleMetadata.candles, {
 //         orphanedRowAction: 'delete',
 //         onDelete: 'CASCADE',

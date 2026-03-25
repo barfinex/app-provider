@@ -18,30 +18,25 @@ import { QuestDBModule } from '../questdb/questdb.module';
 import { EventSinkModule } from '../questdb/event-sink/event-sink.module';
 
 @Module({
-    imports: [
-        // 🔁 cycles
-        forwardRef(() => ConnectorModule),
-        forwardRef(() => DetectorModule),
+  imports: [
+    // 🔁 cycles
+    forwardRef(() => ConnectorModule),
+    forwardRef(() => DetectorModule),
 
-        // 🧱 infra
-        QuestDBModule,
-        EventSinkModule,
-    ],
+    // 🧱 infra
+    QuestDBModule,
+    EventSinkModule,
+  ],
 
-    controllers: [
-        OrderController,
-    ],
+  controllers: [OrderController],
 
-    providers: [
-        OrderService,
-        OrderIdempotencyService,
-        OrderRepository,
-        OrderEventAdapter,
-    ],
+  providers: [
+    OrderService,
+    OrderIdempotencyService,
+    OrderRepository,
+    OrderEventAdapter,
+  ],
 
-    exports: [
-        OrderService,
-        OrderRepository,
-    ],
+  exports: [OrderService, OrderRepository],
 })
-export class OrderModule { }
+export class OrderModule {}

@@ -4,7 +4,7 @@ import {
   History,
   MarketType,
   ConnectorType,
-  Symbol,
+  TradingSymbol,
   Candle,
 } from '@barfinex/types';
 
@@ -12,7 +12,6 @@ import { CandleWriterService } from './candle-writer.service';
 import { HistoryLoaderService } from './history/history-loader.service';
 import { DetectorHistoryService } from './detector/detector-history.service';
 import { CandleQueryService } from './candle-query.service';
-import { DerivedCandleService } from './derived/derived-candle.service';
 import { floor, ms } from './time/time.utils';
 
 @Injectable()
@@ -29,13 +28,13 @@ export class CandleService {
     TimeFrame.day,
   ];
   private readonly realtimeLocks = new Map<string, Promise<void>>();
+  private readonly lastFinalTsBySeries = new Map<string, number>();
 
   constructor(
     private readonly history: HistoryLoaderService,
     private readonly detectorHistory: DetectorHistoryService,
     private readonly writer: CandleWriterService,
     private readonly query: CandleQueryService,
-    private readonly derived: DerivedCandleService,
   ) {}
 
   private hasRealtimeRank(tf: TimeFrame): boolean {
@@ -50,7 +49,10 @@ export class CandleService {
     });
   }
 
-  private async withSeriesLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  private async withSeriesLock<T>(
+    key: string,
+    fn: () => Promise<T>,
+  ): Promise<T> {
     const prev = this.realtimeLocks.get(key) ?? Promise.resolve();
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
@@ -79,7 +81,7 @@ export class CandleService {
   async get(
     connectorType: ConnectorType,
     marketType: MarketType,
-    symbol: Symbol,
+    symbol: TradingSymbol,
     interval: TimeFrame,
     options?: { days?: number },
   ): Promise<Candle[]> {
@@ -98,7 +100,7 @@ export class CandleService {
 
   async getByDetectorSysname(
     detectorSysname: string,
-    symbol: string | Symbol,
+    symbol: string | TradingSymbol,
     interval: TimeFrame,
   ): Promise<Candle[]> {
     return this.detectorHistory.getByDetectorSysname(
@@ -121,12 +123,44 @@ export class CandleService {
     const { symbol, interval, connectorType, marketType, candle } = params;
     const lockKey = `${String(connectorType)}:${String(marketType)}:${symbol}`;
     await this.withSeriesLock(lockKey, async () => {
+      const seriesKey = `${String(connectorType)}:${String(
+        marketType,
+      )}:${symbol}:${String(interval)}`;
+      let knownLast: number | undefined =
+        this.lastFinalTsBySeries.get(seriesKey);
+      if (knownLast === undefined) {
+        const persistedLast = await this.query.loadLastTimestamp({
+          symbol,
+          connectorType: String(connectorType),
+          marketType: String(marketType),
+          interval,
+        });
+        if (persistedLast != null) {
+          knownLast = persistedLast;
+          this.lastFinalTsBySeries.set(seriesKey, knownLast);
+        }
+      }
+      const intervalMs = ms(interval);
+      if (knownLast != null && candle.time + intervalMs <= knownLast) {
+        this.logger.debug(
+          `CANDLE_DUPLICATE_SKIPPED symbol=${symbol} interval=${String(
+            interval,
+          )} ts=${new Date(candle.time).toISOString()} knownLast=${new Date(
+            knownLast,
+          ).toISOString()}`,
+        );
+        return;
+      }
       await this.writer.upsertFinalCandle(
         symbol,
         interval,
         candle,
         String(connectorType),
         String(marketType),
+      );
+      this.lastFinalTsBySeries.set(
+        seriesKey,
+        Math.max(knownLast ?? Number.MIN_SAFE_INTEGER, candle.time),
       );
 
       // If source interval isn't in the realtime chain, there is nothing to cascade.
@@ -191,16 +225,6 @@ export class CandleService {
           String(connectorType),
           String(marketType),
         );
-      }
-
-      if (existingIntervals.has(TimeFrame.week) || existingIntervals.has(TimeFrame.month)) {
-        const dayTsMs = floor(candle.time, TimeFrame.day);
-        await this.derived.recomputeAffectedFromDailyClose({
-          symbol,
-          connectorType: String(connectorType),
-          marketType: String(marketType),
-          dayTsMs,
-        });
       }
     });
   }

@@ -26,6 +26,7 @@ import { EventSinkModule } from './questdb/event-sink/event-sink.module';
 import { OrderBookSamplingModule } from './questdb/orderbook-sampling/orderbook-sampling.module';
 
 import { ReplayModule } from './replay/replay.module';
+import { BacktestModule } from './backtest/backtest.module';
 import { SignalsModule } from './signals/signals.module';
 import { ProxyModule } from './proxy/proxy.module';
 import { AppRegistryModule } from './app-registry/app-registry.module';
@@ -40,8 +41,15 @@ import { InspectorProxyModule } from './inspector-proxy/inspector-proxy.module';
 import { ProviderGatewayModule } from './provider-gateway/provider-gateway.module';
 import { ProviderRuntimeHealthController } from './runtime/provider-runtime-health.controller';
 import { ProviderMarketQualityController } from './runtime/provider-market-quality.controller';
+import { ProviderRuntimeOwnershipController } from './runtime/provider-runtime-ownership.controller';
 import { ProviderRuntimeHealthService } from './runtime/provider-runtime-health.service';
 import { ProviderMarketdataMetricsService } from './runtime/provider-marketdata-metrics.service';
+import { RuntimeModule } from './runtime/runtime.module';
+import { ProviderRuntimeController } from './provider-runtime/provider-runtime.controller';
+import { OwnershipModule } from './ownership/ownership.module';
+import { AdvisorRuntimeProxyService } from './provider-runtime/advisor-runtime-proxy.service';
+import { MarketDataModule } from './market-data/market-data.module';
+import { DataQualityModule } from './data-quality/data-quality.module';
 
 @Module({
   imports: [
@@ -94,6 +102,10 @@ import { ProviderMarketdataMetricsService } from './runtime/provider-marketdata-
     DetectorProxyModule,
     InspectorProxyModule,
     ProviderGatewayModule,
+    RuntimeModule,
+    OwnershipModule,
+    MarketDataModule,
+    DataQualityModule,
     WsEventsModule,
     DashboardModule,
     OrderModule,
@@ -101,17 +113,25 @@ import { ProviderMarketdataMetricsService } from './runtime/provider-marketdata-
     ConnectorModule,
     SubscriptionModule,
     ReplayModule,
+    BacktestModule,
   ],
 
-  controllers: [AppController, ProviderRuntimeHealthController, ProviderMarketQualityController],
+  controllers: [
+    AppController,
+    ProviderRuntimeHealthController,
+    ProviderMarketQualityController,
+    ProviderRuntimeOwnershipController,
+    ProviderRuntimeController,
+  ],
   providers: [
     WsHealthGateway,
     ProviderRuntimeHealthService,
     ProviderMarketdataMetricsService,
+    AdvisorRuntimeProxyService,
     {
       provide: APP_GUARD,
       useClass: ProviderApiTokenGuard,
     },
   ],
 })
-export class AppModule { }
+export class AppModule {}

@@ -18,31 +18,23 @@ import { OrderModule } from '../order/order.module';
 import { AppRegistryModule } from '../app-registry/app-registry.module';
 
 @Module({
-    imports: [
-        HttpModule,
+  imports: [
+    HttpModule,
 
-        // ⭐ MUST BE IMPORTED ⭐
-        QuestDBModule,                  // → даёт QuestDBQueryService
-        forwardRef(() => EventSinkModule), // → даёт EventSinkRepository
+    // ⭐ MUST BE IMPORTED ⭐
+    QuestDBModule, // → даёт QuestDBQueryService
+    forwardRef(() => EventSinkModule), // → даёт EventSinkRepository
 
-        // App architecture
-        forwardRef(() => ConnectorModule),
-        forwardRef(() => OrderModule),
-        forwardRef(() => AppRegistryModule), // для статуса offline, если детектор не шлёт чеки
-    ],
+    // App architecture
+    forwardRef(() => ConnectorModule),
+    forwardRef(() => OrderModule),
+    forwardRef(() => AppRegistryModule), // для статуса offline, если детектор не шлёт чеки
+  ],
 
-    controllers: [
-        DetectorController,
-    ],
+  controllers: [DetectorController],
 
-    providers: [
-        DetectorService,
-        DetectorRepository,
-    ],
+  providers: [DetectorService, DetectorRepository],
 
-    exports: [
-        DetectorService,
-        DetectorRepository,
-    ],
+  exports: [DetectorService, DetectorRepository],
 })
-export class DetectorModule { }
+export class DetectorModule {}

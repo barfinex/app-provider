@@ -1,12 +1,12 @@
 export interface ILPWriteOptions {
-    table: string;
+  table: string;
 
-    /** Tag columns */
-    keys?: Record<string, string | number>;
+  /** Tag columns */
+  keys?: Record<string, string | number>;
 
-    /** Field columns */
-    fields?: Record<string, string | number | boolean | null>;
+  /** Field columns */
+  fields?: Record<string, string | number | boolean | null>;
 
-    /** Timestamp в наносекундах */
-    timestamp?: number;
+  /** Timestamp в наносекундах */
+  timestamp?: number;
 }

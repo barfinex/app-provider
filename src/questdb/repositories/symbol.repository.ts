@@ -14,13 +14,14 @@ export interface SymbolEntity {
 
 @Injectable()
 export class SymbolRepository {
-  constructor(private readonly reader: QuestDBQueryService) { }
+  constructor(private readonly reader: QuestDBQueryService) {}
 
   async getAll() {
     return this.reader.query(`
       SELECT *
       FROM symbols
       ORDER BY symbol
+      LIMIT 10000
     `);
   }
 }

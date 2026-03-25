@@ -8,17 +8,32 @@ import {
   Req,
   Res,
 } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiParam,
+  ApiOkResponse,
+  ApiBearerAuth,
+  ApiSecurity,
+} from '@nestjs/swagger';
 import { Request, Response } from 'express';
 import { ProxyService } from './proxy.service';
 import { ProxyAppType } from './proxy.types';
 
 @ApiTags('Proxy')
+@ApiBearerAuth('ProviderApiToken')
+@ApiSecurity('x-api-token')
 @Controller()
 export class ProxyController {
   constructor(private readonly proxyService: ProxyService) {}
 
   @Get('proxy/targets')
+  @ApiOperation({
+    summary: 'List proxy targets',
+    description:
+      'Returns registered advisor, inspector, and detector targets (app keys and base URLs).',
+  })
+  @ApiOkResponse({ description: '{ advisors, inspectors, detectors }' })
   async listTargets() {
     return {
       advisors: await this.proxyService.getTargetsByType('advisor'),
@@ -28,6 +43,12 @@ export class ProxyController {
   }
 
   @All('advisors/:appKey/*')
+  @ApiOperation({
+    summary: 'Proxy to Advisor by app key',
+    description:
+      'Forwards request to the Advisor instance identified by appKey. Path after /advisors/:appKey/ is sent to that Advisor. Returns 502 on forward failure.',
+  })
+  @ApiParam({ name: 'appKey', description: 'Advisor app key from registry' })
   async proxyAdvisor(
     @Param('appKey') appKey: string,
     @Req() req: Request,
@@ -38,6 +59,12 @@ export class ProxyController {
   }
 
   @All('inspectors/:appKey/*')
+  @ApiOperation({
+    summary: 'Proxy to Inspector by app key',
+    description:
+      'Forwards request to the Inspector instance identified by appKey. Path after /inspectors/:appKey/ is sent to that Inspector.',
+  })
+  @ApiParam({ name: 'appKey', description: 'Inspector app key from registry' })
   async proxyInspector(
     @Param('appKey') appKey: string,
     @Req() req: Request,
@@ -48,6 +75,12 @@ export class ProxyController {
   }
 
   @All('detectors/:appKey/*')
+  @ApiOperation({
+    summary: 'Proxy to Detector by app key',
+    description:
+      'Forwards request to the Detector instance identified by appKey. Path after /detectors/:appKey/ is sent to that Detector.',
+  })
+  @ApiParam({ name: 'appKey', description: 'Detector app key from registry' })
   async proxyDetector(
     @Param('appKey') appKey: string,
     @Req() req: Request,

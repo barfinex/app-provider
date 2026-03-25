@@ -4,32 +4,31 @@ import { QuestDBWriteService } from '../questdb-write.service';
 import { QuestDBQueryService } from '../questdb-query.service';
 
 export interface TradeEntity {
-    symbol: string;
-    side: string; // LONG, SHORT
-    price: number;
-    volume: number;
+  symbol: string;
+  side: string; // LONG, SHORT
+  price: number;
+  volume: number;
 }
 
 @Injectable()
 export class TradeRepository extends BaseRepository<TradeEntity> {
-    private readonly logger = new Logger(TradeRepository.name);
+  private readonly logger = new Logger(TradeRepository.name);
 
-    constructor(writer: QuestDBWriteService, reader: QuestDBQueryService) {
-        super('trades', writer, reader);
-    }
+  constructor(writer: QuestDBWriteService, reader: QuestDBQueryService) {
+    super('trades', writer, reader);
+  }
 
-    async getTrades(symbol: string, limit = 200) {
-        symbol = symbol.replace(/'/g, "''");
+  async getTrades(symbol: string, limit = 200) {
+    symbol = symbol.replace(/'/g, "''");
 
-        const rows = await this.query(`
+    const rows = await this.query(`
             SELECT *
             FROM trades
             WHERE symbol='${symbol}'
             ORDER BY ts DESC
             LIMIT ${limit}
         `);
-        this.logger.debug(`[TRADES] rows=${rows.length} symbol=${symbol}`);
-        return rows;
-    }
-
+    this.logger.debug(`[TRADES] rows=${rows.length} symbol=${symbol}`);
+    return rows;
+  }
 }

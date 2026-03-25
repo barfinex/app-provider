@@ -1,10 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
-    Connector,
-    ConnectorMarket,
-    Asset,
-    Position,
-    Order,
+  Connector,
+  ConnectorMarket,
+  Asset,
+  Position,
+  Order,
 } from '@barfinex/types';
 import { ConnectorRegistry } from './connector.registry';
 
@@ -14,116 +14,113 @@ import { ConnectorRegistry } from './connector.registry';
  * — никаких optional внутри engine
  */
 type RuntimeConnector = Omit<
-    Connector,
-    'assets' | 'positions' | 'orders' | 'markets' | 'subscriptions'
+  Connector,
+  'assets' | 'positions' | 'orders' | 'markets' | 'subscriptions'
 > & {
-    assets: Asset[];
-    positions: Position[];
-    orders: Order[];
-    markets: ConnectorMarket[];
-    subscriptions: NonNullable<Connector['subscriptions']>;
+  assets: Asset[];
+  positions: Position[];
+  orders: Order[];
+  markets: ConnectorMarket[];
+  subscriptions: NonNullable<Connector['subscriptions']>;
 };
 
 @Injectable()
 export class ConnectorBuilder {
-    private readonly logger = new Logger(ConnectorBuilder.name);
+  private readonly logger = new Logger(ConnectorBuilder.name);
 
-    // =========================================================================
-    // 🔹 GENERIC DEDUP
-    // =========================================================================
-    private dedupByKey<T>(
-        items: readonly T[],
-        key: (item: T) => string,
-    ): T[] {
-        const map = new Map<string, T>();
-        for (const item of items) {
-            map.set(key(item), item);
-        }
-        return Array.from(map.values());
+  // =========================================================================
+  // 🔹 GENERIC DEDUP
+  // =========================================================================
+  private dedupByKey<T>(items: readonly T[], key: (item: T) => string): T[] {
+    const map = new Map<string, T>();
+    for (const item of items) {
+      map.set(key(item), item);
+    }
+    return Array.from(map.values());
+  }
+
+  // =========================================================================
+  // 🔹 BUILD CONNECTORS (PURE, IDEMPOTENT, ENGINE-GRADE)
+  // =========================================================================
+  async getConnectorsList(): Promise<Connector[]> {
+    const accounts = ConnectorRegistry.accounts ?? [];
+
+    if (accounts.length === 0) {
+      this.logger.warn('No accounts in ConnectorRegistry');
+      return [];
     }
 
-    // =========================================================================
-    // 🔹 BUILD CONNECTORS (PURE, IDEMPOTENT, ENGINE-GRADE)
-    // =========================================================================
-    async getConnectorsList(): Promise<Connector[]> {
-        const accounts = ConnectorRegistry.accounts ?? [];
+    const connectors = new Map<string, RuntimeConnector>();
 
-        if (accounts.length === 0) {
-            this.logger.warn('No accounts in ConnectorRegistry');
-            return [];
-        }
+    for (const account of accounts) {
+      if (!account.connectorType || !account.marketType) continue;
 
-        const connectors = new Map<string, RuntimeConnector>();
+      const connectorKey = account.connectorType;
 
-        for (const account of accounts) {
-            if (!account.connectorType || !account.marketType) continue;
+      // =============================================================
+      // INIT CONNECTOR (runtime-normalized)
+      // =============================================================
+      if (!connectors.has(connectorKey)) {
+        connectors.set(connectorKey, {
+          connectorType: account.connectorType,
+          isActive: account.isActive ?? false,
+          markets: [],
+          assets: [],
+          positions: [],
+          orders: [],
+          subscriptions: [],
+        });
+      }
 
-            const connectorKey = account.connectorType;
+      const connector = connectors.get(connectorKey)!;
+      connector.isActive ||= account.isActive ?? false;
 
-            // =============================================================
-            // INIT CONNECTOR (runtime-normalized)
-            // =============================================================
-            if (!connectors.has(connectorKey)) {
-                connectors.set(connectorKey, {
-                    connectorType: account.connectorType,
-                    isActive: account.isActive ?? false,
-                    markets: [],
-                    assets: [],
-                    positions: [],
-                    orders: [],
-                    subscriptions: [],
-                });
-            }
+      // =============================================================
+      // MARKETS + SYMBOLS
+      // =============================================================
+      let market = connector.markets.find(
+        (m) => m.marketType === account.marketType,
+      );
 
-            const connector = connectors.get(connectorKey)!;
-            connector.isActive ||= account.isActive ?? false;
+      if (!market) {
+        market = {
+          marketType: account.marketType,
+          symbols: [],
+        };
+        connector.markets.push(market);
+      }
 
-            // =============================================================
-            // MARKETS + SYMBOLS
-            // =============================================================
-            let market = connector.markets.find(
-                m => m.marketType === account.marketType,
-            );
+      market.symbols = this.dedupByKey(
+        [...market.symbols, ...(account.symbols ?? [])],
+        (s) => s.name,
+      );
 
-            if (!market) {
-                market = {
-                    marketType: account.marketType,
-                    symbols: [],
-                };
-                connector.markets.push(market);
-            }
+      // =============================================================
+      // ASSETS
+      // =============================================================
+      connector.assets = this.dedupByKey(
+        [...connector.assets, ...(account.assets ?? [])],
+        (a) => `${a.marketType}:${a.symbol?.name}`,
+      );
 
-            market.symbols = this.dedupByKey(
-                [...market.symbols, ...(account.symbols ?? [])],
-                s => s.name,
-            );
+      // =============================================================
+      // POSITIONS
+      // =============================================================
+      connector.positions = this.dedupByKey(
+        [...connector.positions, ...(account.positions ?? [])],
+        (p) => `${p.marketType}:${p.symbol?.name}:${p.side}`,
+      );
 
-            // =============================================================
-            // ASSETS
-            // =============================================================
-            connector.assets = this.dedupByKey(
-                [...connector.assets, ...(account.assets ?? [])],
-                a => `${a.marketType}:${a.symbol?.name}`,
-            );
-
-            // =============================================================
-            // POSITIONS
-            // =============================================================
-            connector.positions = this.dedupByKey(
-                [...connector.positions, ...(account.positions ?? [])],
-                p => `${p.marketType}:${p.symbol?.name}:${p.side}`,
-            );
-
-            // =============================================================
-            // ORDERS
-            // =============================================================
-            connector.orders = this.dedupByKey(
-                [...connector.orders, ...(account.orders ?? [])],
-                o => `${o.marketType}:${o.externalId}`,
-            );
-        }
-
-        // ⬇️ возвращаем как Connector (DTO-friendly)
-        return Array.from(connectors.values());
+      // =============================================================
+      // ORDERS
+      // =============================================================
+      connector.orders = this.dedupByKey(
+        [...connector.orders, ...(account.orders ?? [])],
+        (o) => `${o.marketType}:${o.externalId}`,
+      );
     }
+
+    // ⬇️ возвращаем как Connector (DTO-friendly)
+    return Array.from(connectors.values());
+  }
 }

@@ -17,9 +17,7 @@ export function paginate(
   // calculate start and end item indexes
   const from = totalItems === 0 ? null : (current_page - 1) * pageSize + 1;
   const to =
-    totalItems === 0
-      ? null
-      : Math.min(current_page * pageSize, totalItems);
+    totalItems === 0 ? null : Math.min(current_page * pageSize, totalItems);
 
   const first_page_url = `${APP_URL}${url}&page=1`;
   const last_page_url = `${APP_URL}${url}&page=${totalPages}`;

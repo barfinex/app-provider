@@ -1,10 +1,5 @@
 import { HttpService } from '@nestjs/axios';
-import {
-  HttpException,
-  HttpStatus,
-  Injectable,
-  Logger,
-} from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { AxiosRequestConfig } from 'axios';
 import { Counter, register } from 'prom-client';
 import { lastValueFrom } from 'rxjs';
@@ -133,6 +128,7 @@ export class AdvisorProxyService {
       };
 
       if (allowCache && ttlMs) {
+        this.evictExpiredCache();
         const cacheKey = this.buildCacheKey(endpoint, query ?? {});
         this.cache.set(cacheKey, {
           value: result,
@@ -152,15 +148,86 @@ export class AdvisorProxyService {
     }
   }
 
+  /**
+   * Forward to a raw path without the automatic `advisor/` prefix.
+   * Used for Advisor endpoints that have non-advisor controller prefixes
+   * (e.g. financial-api/, news/, recommendations/, advisor-agent/).
+   */
+  async requestRaw(
+    method: string,
+    rawPath: string,
+    query?: Record<string, unknown>,
+    body?: Record<string, unknown>,
+    headers?: Record<string, unknown>,
+  ): Promise<AdvisorProxyResult> {
+    const normalizedMethod = method.toUpperCase();
+    if (!this.allowedMethods.has(normalizedMethod)) {
+      throw this.createNormalizedError(
+        HttpStatus.METHOD_NOT_ALLOWED,
+        `Method ${normalizedMethod} not allowed`,
+      );
+    }
+
+    const url = this.buildRawUrl(rawPath);
+    const config: AxiosRequestConfig = {
+      url,
+      method: normalizedMethod as AxiosRequestConfig['method'],
+      params: query ?? {},
+      data: body,
+      timeout: this.timeoutMs,
+      headers: this.buildTraceHeaders(headers),
+      validateStatus: () => true,
+    };
+
+    try {
+      const response = await lastValueFrom(this.httpService.request(config));
+      this.logger.debug(
+        `[ADVISOR_PROXY_RAW] path=${rawPath} status=${response.status}`,
+      );
+      if (response.status >= 400) {
+        return {
+          status: response.status,
+          data: this.createErrorPayload(
+            response.status,
+            this.extractErrorMessage(response.data),
+          ),
+        };
+      }
+      return { status: response.status, data: response.data };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `[ADVISOR_PROXY_RAW] path=${rawPath} unavailable: ${message}`,
+      );
+      throw this.createNormalizedError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        'Advisor API temporarily unavailable',
+      );
+    }
+  }
+
   private buildAdvisorUrl(endpoint: string): string {
-    const baseUrl = (process.env.ADVISOR_API_URL || 'http://localhost:8009/api')
-      .trim()
-      .replace(/\/+$/, '');
+    const baseUrl = this.resolveBaseUrl();
     const cleanEndpoint = endpoint.replace(/^\/+/, '');
     return `${baseUrl}/advisor/${cleanEndpoint}`;
   }
 
-  private buildCacheKey(endpoint: string, query: Record<string, unknown>): string {
+  private buildRawUrl(rawPath: string): string {
+    const baseUrl = this.resolveBaseUrl();
+    const cleanPath = rawPath.replace(/^\/+/, '');
+    return `${baseUrl}/${cleanPath}`;
+  }
+
+  private resolveBaseUrl(): string {
+    return (process.env.ADVISOR_API_URL || 'http://localhost:8009/api')
+      .trim()
+      .replace(/\/+$/, '');
+  }
+
+  private buildCacheKey(
+    endpoint: string,
+    query: Record<string, unknown>,
+  ): string {
     return `${endpoint}:${JSON.stringify(query)}`;
   }
 
@@ -172,6 +239,14 @@ export class AdvisorProxyService {
       return null;
     }
     return entry.value;
+  }
+
+  /** Evict all expired entries from the cache. Called lazily before new writes. */
+  private evictExpiredCache(): void {
+    const now = Date.now();
+    for (const [key, entry] of this.cache) {
+      if (entry.expiresAt <= now) this.cache.delete(key);
+    }
   }
 
   private logCacheResult(endpoint: string, hit: boolean): void {
@@ -202,7 +277,7 @@ export class AdvisorProxyService {
       const value = input[name];
       if (value === undefined || value === null) continue;
       headers[name] = Array.isArray(value)
-        ? value.map(item => String(item)).join(', ')
+        ? value.map((item) => String(item)).join(', ')
         : String(value);
     }
     return headers;
@@ -232,7 +307,8 @@ export class AdvisorProxyService {
 
   private extractErrorMessage(input: unknown): string {
     if (typeof input === 'string' && input.trim().length > 0) return input;
-    if (typeof input !== 'object' || input === null) return 'Advisor request failed';
+    if (typeof input !== 'object' || input === null)
+      return 'Advisor request failed';
 
     const asRecord = input as Record<string, unknown>;
     const candidate = asRecord.error ?? asRecord.message;

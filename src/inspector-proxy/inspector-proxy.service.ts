@@ -18,7 +18,13 @@ interface InspectorProxyErrorResponse {
 export class InspectorProxyService {
   private readonly logger = new Logger(InspectorProxyService.name);
   private readonly timeoutMs = this.resolveTimeoutMs();
-  private readonly allowedMethods = new Set(['GET', 'POST', 'PUT', 'DELETE', 'PATCH']);
+  private readonly allowedMethods = new Set([
+    'GET',
+    'POST',
+    'PUT',
+    'DELETE',
+    'PATCH',
+  ]);
   private readonly forwardTraceHeaders = ['x-request-id', 'x-correlation-id'];
 
   constructor(private readonly httpService: HttpService) {}
@@ -89,7 +95,9 @@ export class InspectorProxyService {
   }
 
   private buildInspectorUrl(endpoint: string): string {
-    const baseUrl = (process.env.INSPECTOR_API_URL || 'http://localhost:8008/api')
+    const baseUrl = (
+      process.env.INSPECTOR_API_URL || 'http://localhost:8008/api'
+    )
       .trim()
       .replace(/\/+$/, '');
     const cleanEndpoint = endpoint.replace(/^\/+/, '');
@@ -143,7 +151,8 @@ export class InspectorProxyService {
 
   private extractErrorMessage(input: unknown): string {
     if (typeof input === 'string' && input.trim().length > 0) return input;
-    if (typeof input !== 'object' || input === null) return 'Inspector request failed';
+    if (typeof input !== 'object' || input === null)
+      return 'Inspector request failed';
 
     const asRecord = input as Record<string, unknown>;
     const candidate = asRecord.error ?? asRecord.message;
