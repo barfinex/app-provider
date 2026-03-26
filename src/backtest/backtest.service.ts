@@ -179,7 +179,7 @@ export class BacktestService {
       // QuestDB returns ts in microseconds (ns in wire), divide by 1_000_000 for ms
       time: Math.round(Number(row['ts']) / 1_000_000),
       interval: String(row['interval']) as TimeFrame,
-      symbol: { name: String(row['symbol']) },
+      instrument: { symbol: String(row['symbol']) },
     }));
   }
 

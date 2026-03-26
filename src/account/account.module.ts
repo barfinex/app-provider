@@ -8,14 +8,14 @@ import { ConnectorModule } from '../connector/connector.module';
 import { OrderModule } from '../order/order.module'; // чтобы AccountService мог закрывать/открывать ордера
 import { DetectorModule } from '../detector/detector.module'; // если нужны детекторы
 import { AccountLifecycle } from './account.lifecycle';
-import { BinanceModule } from '../connector/datasource/binance/binance.module';
+import { ExchangeDataModule } from '../connector/datasource/exchange/exchange-data.module';
 
 @Module({
   imports: [
     forwardRef(() => ConnectorModule),
     forwardRef(() => OrderModule),
     forwardRef(() => DetectorModule),
-    BinanceModule,
+    ExchangeDataModule,
   ],
   controllers: [AccountController],
   providers: [AccountService, AccountLifecycle],

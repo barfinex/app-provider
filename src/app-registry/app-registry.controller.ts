@@ -303,7 +303,7 @@ export class AppRegistryController {
                 const throttle = health.throttleState as
                   | Record<string, unknown>
                   | undefined;
-                const symbolNames = throttle
+                const instrumentNames = throttle
                   ? Object.keys(throttle)
                   : Array.from(
                       { length: symbolCount },
@@ -311,7 +311,7 @@ export class AppRegistryController {
                     );
                 return {
                   ...item,
-                  symbols: symbolNames,
+                  symbols: instrumentNames,
                   strategies: Object.keys(throttle ?? {}),
                   health: 'OK',
                 };

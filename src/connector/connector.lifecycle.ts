@@ -12,7 +12,7 @@ import {
   MarketType,
   SubscriptionType,
   TimeFrame,
-  TradingSymbol,
+  Instrument,
   ALL_CANDLE_INTERVALS,
 } from '@barfinex/types';
 import { ConfigService } from '@barfinex/config';
@@ -24,9 +24,10 @@ import { DetectorService } from '../detector/detector.service';
 import { KeyService } from '@barfinex/key';
 import { AccountService } from '../account/account.service';
 import { ProviderOwnershipService } from '../ownership/provider-ownership.service';
-import { SymbolShardService } from '../ownership/symbol-shard.service';
+import { InstrumentShardService } from '../ownership/instrument-shard.service';
 import { ownershipScopeKey } from '../ownership/ownership.types';
 import { ProviderBootstrapService } from '../runtime/provider-bootstrap.service';
+import { ExchangeManagerService } from './exchange-manager/exchange-manager.service';
 
 /** Initial delay (ms) for ownership claim retry. */
 const OWNERSHIP_CLAIM_RETRY_INITIAL_MS = 5_000;
@@ -37,7 +38,7 @@ const OWNERSHIP_CLAIM_RETRY_MAX_MS = 30_000;
 interface PendingOwnershipSlot {
   connectorType: ConnectorType;
   marketType: MarketType;
-  symbols: TradingSymbol[];
+  instruments: Instrument[];
   intervals: TimeFrame[];
 }
 
@@ -68,14 +69,15 @@ export class ConnectorLifecycle implements OnModuleInit, OnModuleDestroy {
     private readonly subscriptionService: ConnectorSubscriptionService,
     private readonly configService: ConfigService,
     private readonly ownershipService: ProviderOwnershipService,
-    private readonly symbolShardService: SymbolShardService,
+    private readonly instrumentShardService: InstrumentShardService,
     private readonly bootstrap: ProviderBootstrapService,
+    private readonly exchangeManager: ExchangeManagerService,
   ) {}
 
   private addPendingOwnershipSlot(
     connectorType: ConnectorType,
     marketType: MarketType,
-    symbols: TradingSymbol[],
+    instruments: Instrument[],
     intervals: TimeFrame[],
   ): void {
     const key = ownershipScopeKey({ connectorType, marketType });
@@ -83,7 +85,7 @@ export class ConnectorLifecycle implements OnModuleInit, OnModuleDestroy {
     this.pendingOwnershipSlots.set(key, {
       connectorType,
       marketType,
-      symbols,
+      instruments,
       intervals,
     });
     this.logger.debug(
@@ -129,12 +131,12 @@ export class ConnectorLifecycle implements OnModuleInit, OnModuleDestroy {
       this.pendingOwnershipSlots.entries(),
     )) {
       if (this.destroyed) break;
-      const { connectorType, marketType, symbols, intervals } = slot;
+      const { connectorType, marketType, instruments, intervals } = slot;
       let claimed = false;
-      let symbolsToSubscribe: TradingSymbol[] = symbols;
+      let symbolsToSubscribe: Instrument[] = instruments;
 
-      if (this.symbolShardService.isEnabled()) {
-        const localShardIds = this.symbolShardService.getLocalShardIds();
+      if (this.instrumentShardService.isEnabled()) {
+        const localShardIds = this.instrumentShardService.getLocalShardIds();
         const claimedShardIds: number[] = [];
         for (const shardId of localShardIds) {
           const scope = { connectorType, marketType, shardId };
@@ -142,8 +144,8 @@ export class ConnectorLifecycle implements OnModuleInit, OnModuleDestroy {
           if (claimResult.success) claimedShardIds.push(shardId);
         }
         claimed = claimedShardIds.length > 0;
-        symbolsToSubscribe = symbols.filter((s) =>
-          claimedShardIds.includes(this.symbolShardService.getShardId(s.name)),
+        symbolsToSubscribe = instruments.filter((s) =>
+          claimedShardIds.includes(this.instrumentShardService.getShardId(s.symbol)),
         );
       } else {
         const scope = { connectorType, marketType };
@@ -194,6 +196,9 @@ export class ConnectorLifecycle implements OnModuleInit, OnModuleDestroy {
       this.keyService.initializeKey();
       ConnectorRegistry.key = this.keyService.key;
       this.logger.debug(`Initialized key: ${ConnectorRegistry.key}`);
+
+      // Bootstrap ExchangeManager from config (register pre-configured connectors)
+      await this.exchangeManager.bootstrapFromConfig();
 
       // =========================================================================
       // 2) ЗАГРУЗКА АККАУНТОВ (КРИТИЧЕСКИ ВАЖНО)
@@ -322,20 +327,20 @@ export class ConnectorLifecycle implements OnModuleInit, OnModuleDestroy {
       );
 
       for (const market of connector.markets) {
-        const symbols: TradingSymbol[] = [];
+        const instruments: Instrument[] = [];
 
         this.logger.log(
           `Market: ${market.marketType}, symbols=${
-            market.symbols?.length ?? 0
+            market.instruments?.length ?? 0
           }`,
         );
 
         // -----------------------------------------------------------------
         // 6.1) SYMBOLS ИЗ АККАУНТОВ (ГЛАВНЫЙ ИСТОЧНИК)
         // -----------------------------------------------------------------
-        market.symbols?.forEach((symbol) => {
-          if (!symbols.find((q) => q.name === symbol.name)) {
-            symbols.push(symbol);
+        market.instruments?.forEach((symbol) => {
+          if (!instruments.find((q) => q.symbol === symbol.symbol)) {
+            instruments.push(symbol);
           }
         });
 
@@ -358,11 +363,11 @@ export class ConnectorLifecycle implements OnModuleInit, OnModuleDestroy {
         );
 
         detectorsCollection.forEach((detector) => {
-          detector.symbols.forEach((symbol) => {
-            if (!symbols.find((q) => q.name === symbol.name)) {
-              symbols.push(symbol);
+          detector.instruments.forEach((symbol) => {
+            if (!instruments.find((q) => q.symbol === symbol.symbol)) {
+              instruments.push(symbol);
               this.logger.debug(
-                `Added detector symbol: ${symbol.name} (detector ${detector.key})`,
+                `Added detector symbol: ${symbol.symbol} (detector ${detector.key})`,
               );
             }
           });
@@ -376,8 +381,8 @@ export class ConnectorLifecycle implements OnModuleInit, OnModuleDestroy {
           market.marketType,
         );
         configuredStreamSymbols.forEach((symbolName) => {
-          if (!symbols.find((q) => q.name === symbolName)) {
-            symbols.push({ name: symbolName });
+          if (!instruments.find((q) => q.symbol === symbolName)) {
+            instruments.push({ symbol: symbolName });
             this.logger.debug(
               `Added configured stream symbol: ${symbolName} (connector ${connector.connectorType})`,
             );
@@ -388,8 +393,8 @@ export class ConnectorLifecycle implements OnModuleInit, OnModuleDestroy {
         // 6.4) DEFAULT SYMBOL (BTCUSDT)
         // -----------------------------------------------------------------
         const defaultSymbol = 'BTCUSDT';
-        if (!symbols.find((q) => q.name === defaultSymbol)) {
-          symbols.push({ name: defaultSymbol });
+        if (!instruments.find((q) => q.symbol === defaultSymbol)) {
+          instruments.push({ symbol: defaultSymbol });
           this.logger.warn(
             `Added default symbol: ${defaultSymbol} (connector ${connector.connectorType})`,
           );
@@ -398,14 +403,14 @@ export class ConnectorLifecycle implements OnModuleInit, OnModuleDestroy {
         // -----------------------------------------------------------------
         // 6.5) CLAIM OWNERSHIP THEN ОБНОВЛЕНИЕ ПОДПИСОК
         // -----------------------------------------------------------------
-        if (symbols.length > 0) {
+        if (instruments.length > 0) {
           const connectorType = connector.connectorType;
           const marketType = market.marketType;
           let claimed = false;
-          let symbolsToSubscribe: TradingSymbol[] = symbols;
+          let symbolsToSubscribe: Instrument[] = instruments;
 
-          if (this.symbolShardService.isEnabled()) {
-            const localShardIds = this.symbolShardService.getLocalShardIds();
+          if (this.instrumentShardService.isEnabled()) {
+            const localShardIds = this.instrumentShardService.getLocalShardIds();
             const claimedShardIds: number[] = [];
             for (const shardId of localShardIds) {
               const scope = { connectorType, marketType, shardId };
@@ -421,9 +426,9 @@ export class ConnectorLifecycle implements OnModuleInit, OnModuleDestroy {
               }
             }
             claimed = claimedShardIds.length > 0;
-            symbolsToSubscribe = symbols.filter((s) =>
+            symbolsToSubscribe = instruments.filter((s) =>
               claimedShardIds.includes(
-                this.symbolShardService.getShardId(s.name),
+                this.instrumentShardService.getShardId(s.symbol),
               ),
             );
             if (claimed && symbolsToSubscribe.length > 0) {
@@ -437,7 +442,7 @@ export class ConnectorLifecycle implements OnModuleInit, OnModuleDestroy {
               this.addPendingOwnershipSlot(
                 connectorType,
                 marketType,
-                symbols,
+                instruments,
                 intervals,
               );
             }
@@ -454,7 +459,7 @@ export class ConnectorLifecycle implements OnModuleInit, OnModuleDestroy {
               this.addPendingOwnershipSlot(
                 connectorType,
                 marketType,
-                symbols,
+                instruments,
                 intervals,
               );
             }
@@ -467,7 +472,7 @@ export class ConnectorLifecycle implements OnModuleInit, OnModuleDestroy {
             );
             this.logger.log(
               `Updating subscription: connector=${connectorType}, market=${marketType}, symbols=${symbolsToSubscribe
-                .map((s) => s.name)
+                .map((s) => s.symbol)
                 .join(', ')}`,
             );
 
@@ -553,7 +558,7 @@ export class ConnectorLifecycle implements OnModuleInit, OnModuleDestroy {
         `[ConnectorLifecycle] destroy detectors=${JSON.stringify(
           ConnectorRegistry.detectors.map((d) => ({
             key: d.key,
-            symbols: d.symbols?.length,
+            symbols: d.instruments?.length,
           })),
         )}`,
       );
@@ -568,10 +573,10 @@ export class ConnectorLifecycle implements OnModuleInit, OnModuleDestroy {
 
         connector.markets.forEach((market) => {
           this.logger.debug(
-            `[ConnectorLifecycle] destroy marketType=${market.marketType} symbols=${market.symbols?.length}`,
+            `[ConnectorLifecycle] destroy marketType=${market.marketType} symbols=${market.instruments?.length}`,
           );
 
-          if (market.symbols && market.symbols.length > 0) {
+          if (market.instruments && market.instruments.length > 0) {
             this.logger.debug(
               `[ConnectorLifecycle] destroy unsubscribe connector=${connector.connectorType} source=market-symbols`,
             );
@@ -602,13 +607,13 @@ export class ConnectorLifecycle implements OnModuleInit, OnModuleDestroy {
           }
 
           ConnectorRegistry.detectors.forEach((detector) => {
-            const { symbols } = detector;
+            const { instruments } = detector;
 
             this.logger.debug(
-              `[ConnectorLifecycle] destroy detector=${detector.key} symbols=${symbols?.length}`,
+              `[ConnectorLifecycle] destroy detector=${detector.key} symbols=${instruments?.length}`,
             );
 
-            if (symbols.length > 0) {
+            if (instruments.length > 0) {
               this.logger.debug(
                 `[ConnectorLifecycle] destroy unsubscribe connector=${connector.connectorType} source=detector-symbols`,
               );
@@ -659,7 +664,7 @@ export class ConnectorLifecycle implements OnModuleInit, OnModuleDestroy {
       SubscriptionType.PROVIDER_MARKETDATA_TRADE,
       SubscriptionType.PROVIDER_MARKETDATA_ORDERBOOK,
       SubscriptionType.PROVIDER_MARKETDATA_CANDLE,
-      SubscriptionType.PROVIDER_SYMBOL_PRICES,
+      SubscriptionType.PROVIDER_INSTRUMENT_PRICES,
     ]);
     const collected = new Set<string>();
     for (const subscription of configuredConnector?.subscriptions ?? []) {

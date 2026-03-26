@@ -8,10 +8,10 @@ import { AccountModule } from './account/account.module';
 import { OrderModule } from './order/order.module';
 import { SubscriptionModule } from './subscription/subscription.module';
 import { ConnectorModule } from './connector/connector.module';
-import { BinanceModule } from './connector/datasource/binance/binance.module';
+import { ExchangeDataModule } from './connector/datasource/exchange/exchange-data.module';
 import { DetectorModule } from './detector/detector.module';
 import { AssetModule } from './asset/asset.module';
-import { SymbolModule } from './symbol/symbol.module';
+import { InstrumentModule } from './instrument/instrument.module';
 import { PortainerModule } from './portainer/portainer.module';
 
 import { ProviderWsBridgeModule } from '@barfinex/provider-ws-bridge';
@@ -94,7 +94,7 @@ import { DataQualityModule } from './data-quality/data-quality.module';
     DetectorModule,
     AccountModule,
     AssetModule,
-    SymbolModule,
+    InstrumentModule,
     SignalsModule,
     AppRegistryModule,
     ProxyModule,
@@ -109,7 +109,7 @@ import { DataQualityModule } from './data-quality/data-quality.module';
     WsEventsModule,
     DashboardModule,
     OrderModule,
-    BinanceModule,
+    ExchangeDataModule,
     ConnectorModule,
     SubscriptionModule,
     ReplayModule,

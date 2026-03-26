@@ -38,7 +38,8 @@ function progressBar(written: number, total: number): string {
 @Injectable()
 export class ConsoleWarmupProgressService implements OnModuleDestroy {
   private readonly instruments = new Map<string, InstrumentProgress>();
-  private tickTimer: ReturnType<typeof setInterval> | null = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private tickTimer: any = null;
   private lastRenderedWidth = 0;
   private lastProgressSignature = '';
   private readonly isTty: boolean;
@@ -142,7 +143,7 @@ export class ConsoleWarmupProgressService implements OnModuleDestroy {
         typeof chunk === 'string'
           ? chunk
           : Buffer.isBuffer(chunk)
-          ? chunk.toString()
+          ? (chunk as Buffer).toString()
           : '';
       if (
         this.lastRenderedWidth > 0 &&

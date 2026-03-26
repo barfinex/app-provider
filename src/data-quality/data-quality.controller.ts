@@ -36,9 +36,9 @@ export class DataQualityController {
     description: 'Returns data quality and advisor readiness for one symbol.',
   })
   @ApiParam({ name: 'symbol', example: 'BTCUSDT' })
-  @ApiOkResponse({ description: 'ProviderSymbolDataQualityResponse' })
-  async getSymbol(@Param('symbol') symbol: string) {
-    const result = await this.dataQualityService.getSymbol(symbol);
+  @ApiOkResponse({ description: 'ProviderInstrumentDataQualityResponse' })
+  async getInstrument(@Param('symbol') symbol: string) {
+    const result = await this.dataQualityService.getInstrument(symbol);
     if (result == null) {
       return {
         symbol: symbol.trim().toUpperCase(),

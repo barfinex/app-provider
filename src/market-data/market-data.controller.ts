@@ -15,7 +15,7 @@ import {
   ApiSecurity,
 } from '@nestjs/swagger';
 import { QuestDBQueryService } from '../questdb/questdb-query.service';
-import { BinanceService } from '../connector/datasource/binance/binance.service';
+import { ExchangeDataService } from '../connector/datasource/exchange/exchange-data.service';
 import { toDomainInterval } from '../candle/time/time.utils';
 import {
   MarketDataRetentionService,
@@ -50,7 +50,7 @@ function normalizeMarketType(value?: string): string | undefined {
   return normalized;
 }
 
-function normalizeSymbol(value?: string): string {
+function normalizeInstrument(value?: string): string {
   return String(value ?? '')
     .trim()
     .toUpperCase();
@@ -64,7 +64,7 @@ export class MarketDataController {
   constructor(
     private readonly reader: QuestDBQueryService,
     private readonly retention: MarketDataRetentionService,
-    private readonly binanceService: BinanceService,
+    private readonly exchangeDataService: ExchangeDataService,
   ) {}
 
   private parseOrderbookSnapshot(snapshotJson: unknown): {
@@ -188,14 +188,14 @@ export class MarketDataController {
     const orderDir = (order ?? 'desc').toLowerCase() === 'asc' ? 'ASC' : 'DESC';
     const normalizedConnector = normalizeConnectorType(connectorType);
     const normalizedMarket = normalizeMarketType(marketType);
-    const normalizedSymbol = normalizeSymbol(symbol);
+    const normalizedInstrument = normalizeInstrument(symbol);
     const where: string[] = [];
     if (normalizedConnector)
       where.push(`connectorType = '${escapeSql(normalizedConnector)}'`);
     if (normalizedMarket)
       where.push(`marketType = '${escapeSql(normalizedMarket)}'`);
-    if (normalizedSymbol)
-      where.push(`symbol = '${escapeSql(normalizedSymbol)}'`);
+    if (normalizedInstrument)
+      where.push(`symbol = '${escapeSql(normalizedInstrument)}'`);
     if (from && to && (parseInt(from, 10) || 0) > (parseInt(to, 10) || 0)) {
       throw new BadRequestException(
         '"from" must be less than or equal to "to"',
@@ -211,9 +211,9 @@ export class MarketDataController {
     }
 
     // Runtime fallback keeps API usable when persistence lags or is unavailable.
-    if (normalizedSymbol) {
-      const runtimeTrades = this.binanceService.getRecentRuntimeTrades(
-        normalizedSymbol,
+    if (normalizedInstrument) {
+      const runtimeTrades = this.exchangeDataService.getRecentRuntimeTrades(
+        normalizedInstrument,
         limitNum,
       );
       if (runtimeTrades.length > 0) {
@@ -266,14 +266,14 @@ export class MarketDataController {
     );
     const normalizedConnector = normalizeConnectorType(connectorType);
     const normalizedMarket = normalizeMarketType(marketType);
-    const normalizedSymbol = normalizeSymbol(symbol);
+    const normalizedInstrument = normalizeInstrument(symbol);
     const where: string[] = [];
     if (normalizedConnector)
       where.push(`connectorType = '${escapeSql(normalizedConnector)}'`);
     if (normalizedMarket)
       where.push(`marketType = '${escapeSql(normalizedMarket)}'`);
-    if (normalizedSymbol)
-      where.push(`symbol = '${escapeSql(normalizedSymbol)}'`);
+    if (normalizedInstrument)
+      where.push(`symbol = '${escapeSql(normalizedInstrument)}'`);
     if (window) where.push(`window = '${escapeSql(window)}'`);
     if (from && to && (parseInt(from, 10) || 0) > (parseInt(to, 10) || 0)) {
       throw new BadRequestException(
@@ -361,14 +361,14 @@ export class MarketDataController {
     );
     const normalizedConnector = normalizeConnectorType(connectorType);
     const normalizedMarket = normalizeMarketType(marketType);
-    const normalizedSymbol = normalizeSymbol(symbol);
+    const normalizedInstrument = normalizeInstrument(symbol);
     const where: string[] = [];
     if (normalizedConnector)
       where.push(`connectorType = '${escapeSql(normalizedConnector)}'`);
     if (normalizedMarket)
       where.push(`marketType = '${escapeSql(normalizedMarket)}'`);
-    if (normalizedSymbol)
-      where.push(`symbol = '${escapeSql(normalizedSymbol)}'`);
+    if (normalizedInstrument)
+      where.push(`symbol = '${escapeSql(normalizedInstrument)}'`);
     if (from && to && (parseInt(from, 10) || 0) > (parseInt(to, 10) || 0)) {
       throw new BadRequestException(
         '"from" must be less than or equal to "to"',
@@ -409,14 +409,14 @@ export class MarketDataController {
     );
     const normalizedConnector = normalizeConnectorType(connectorType);
     const normalizedMarket = normalizeMarketType(marketType);
-    const normalizedSymbol = normalizeSymbol(symbol);
+    const normalizedInstrument = normalizeInstrument(symbol);
     const where: string[] = [];
     if (normalizedConnector)
       where.push(`connectorType = '${escapeSql(normalizedConnector)}'`);
     if (normalizedMarket)
       where.push(`marketType = '${escapeSql(normalizedMarket)}'`);
-    if (normalizedSymbol)
-      where.push(`symbol = '${escapeSql(normalizedSymbol)}'`);
+    if (normalizedInstrument)
+      where.push(`symbol = '${escapeSql(normalizedInstrument)}'`);
     if (from && to && (parseInt(from, 10) || 0) > (parseInt(to, 10) || 0)) {
       throw new BadRequestException(
         '"from" must be less than or equal to "to"',
@@ -431,9 +431,9 @@ export class MarketDataController {
       return { data };
     }
 
-    if (normalizedSymbol) {
+    if (normalizedInstrument) {
       const runtimeSnapshot =
-        this.binanceService.getMarketQualitySnapshot(normalizedSymbol);
+        this.exchangeDataService.getMarketQualitySnapshot(normalizedInstrument);
       if (runtimeSnapshot?.orderbook) {
         const bids = (runtimeSnapshot.orderbook.bids ?? [])
           .map(
@@ -471,9 +471,9 @@ export class MarketDataController {
               {
                 ts:
                   runtimeSnapshot.timestamps?.orderbookTimestamp ?? Date.now(),
-                connectorType: normalizedConnector ?? 'binance',
+                connectorType: normalizedConnector ?? connectorType,
                 marketType: normalizedMarket ?? 'futures',
-                symbol: normalizedSymbol,
+                symbol: normalizedInstrument,
                 depthLevels: Math.max(bids.length, asks.length),
                 snapshotJson: JSON.stringify({
                   b: bids,
@@ -519,14 +519,14 @@ export class MarketDataController {
     );
     const normalizedConnector = normalizeConnectorType(connectorType);
     const normalizedMarket = normalizeMarketType(marketType);
-    const normalizedSymbol = normalizeSymbol(symbol);
+    const normalizedInstrument = normalizeInstrument(symbol);
     const where: string[] = [];
     if (normalizedConnector)
       where.push(`connectorType = '${escapeSql(normalizedConnector)}'`);
     if (normalizedMarket)
       where.push(`marketType = '${escapeSql(normalizedMarket)}'`);
-    if (normalizedSymbol)
-      where.push(`symbol = '${escapeSql(normalizedSymbol)}'`);
+    if (normalizedInstrument)
+      where.push(`symbol = '${escapeSql(normalizedInstrument)}'`);
     if (from && to && (parseInt(from, 10) || 0) > (parseInt(to, 10) || 0)) {
       throw new BadRequestException(
         '"from" must be less than or equal to "to"',
@@ -651,9 +651,9 @@ export class MarketDataController {
     @Query('candlesLimit') candlesLimit?: string,
     @Query('candlesTo') candlesTo?: string,
   ) {
-    const sym = normalizeSymbol(symbol);
+    const sym = normalizeInstrument(symbol);
     const normalizedConnector =
-      normalizeConnectorType(connectorType) ?? 'binance';
+      normalizeConnectorType(connectorType) ?? connectorType ?? '';
     const normalizedMarket = normalizeMarketType(marketType) ?? 'futures';
     const normalizedInterval = String(toDomainInterval(candleInterval ?? '1m'));
     const obLimit = Math.min(
@@ -755,7 +755,7 @@ export class MarketDataController {
 
     let tradesSource: 'questdb' | 'runtime-fallback' | 'empty' =
       trades.length > 0 ? 'questdb' : 'empty';
-    const runtimeSnapshot = this.binanceService.getMarketQualitySnapshot(sym);
+    const runtimeSnapshot = this.exchangeDataService.getMarketQualitySnapshot(sym);
     if (bids.length === 0 && asks.length === 0 && runtimeSnapshot?.orderbook) {
       bids = (runtimeSnapshot.orderbook.bids ?? [])
         .map(
@@ -798,7 +798,7 @@ export class MarketDataController {
 
     const runtimeTrades =
       trades.length === 0
-        ? this.binanceService.getRecentRuntimeTrades(sym, trLimit)
+        ? this.exchangeDataService.getRecentRuntimeTrades(sym, trLimit)
         : [];
     if (trades.length === 0 && runtimeTrades.length > 0) {
       trades.push(
@@ -855,7 +855,7 @@ export class MarketDataController {
     }
 
     const marketQualityReport = runtimeSnapshot
-      ? this.binanceService.getMarketQualityReport(sym, runtimeSnapshot)
+      ? this.exchangeDataService.getMarketQualityReport(sym, runtimeSnapshot)
       : null;
     const marketQuality =
       runtimeSnapshot && marketQualityReport

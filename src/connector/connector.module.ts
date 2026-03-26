@@ -18,13 +18,14 @@ import { AccountModule } from '../account/account.module';
 import { ConfigModule } from '@barfinex/config';
 import { KeyModule } from '@barfinex/key';
 
-import { SymbolRepository } from '../symbol/symbol.repository';
+import { InstrumentRepository } from '../instrument/instrument.repository';
 
 import { QuestDBModule } from '../questdb/questdb.module';
 import { EventSinkModule } from '../questdb/event-sink/event-sink.module';
 import { QuestDbIlpModule } from '../questdb/ilp/questdb-ilp.module';
 
-import { BinanceModule } from './datasource/binance/binance.module';
+import { ExchangeDataModule } from './datasource/exchange/exchange-data.module';
+import { ExchangeManagerModule } from './exchange-manager/exchange-manager.module';
 import { OwnershipModule } from '../ownership/ownership.module';
 
 @Module({
@@ -48,7 +49,10 @@ import { OwnershipModule } from '../ownership/ownership.module';
     EventSinkModule,
 
     // Datasources
-    forwardRef(() => BinanceModule),
+    forwardRef(() => ExchangeDataModule),
+
+    // Exchange management (catalog, activate/deactivate, credentials)
+    ExchangeManagerModule,
   ],
 
   controllers: [ConnectorController],
@@ -69,7 +73,7 @@ import { OwnershipModule } from '../ownership/ownership.module';
     ConnectorBuilder,
 
     // Repositories (ТОЛЬКО свои)
-    SymbolRepository,
+    InstrumentRepository,
   ],
 
   exports: [
@@ -79,6 +83,7 @@ import { OwnershipModule } from '../ownership/ownership.module';
     ConnectorSubscriptionService,
     // ConnectorLifecycle,
     ConnectorBuilder,
+    ExchangeManagerModule,
   ],
 })
 export class ConnectorModule {}

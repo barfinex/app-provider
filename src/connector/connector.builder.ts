@@ -85,14 +85,14 @@ export class ConnectorBuilder {
       if (!market) {
         market = {
           marketType: account.marketType,
-          symbols: [],
+          instruments: [],
         };
         connector.markets.push(market);
       }
 
-      market.symbols = this.dedupByKey(
-        [...market.symbols, ...(account.symbols ?? [])],
-        (s) => s.name,
+      market.instruments = this.dedupByKey(
+        [...market.instruments, ...(account.instruments ?? [])],
+        (s) => s.symbol,
       );
 
       // =============================================================
@@ -100,7 +100,7 @@ export class ConnectorBuilder {
       // =============================================================
       connector.assets = this.dedupByKey(
         [...connector.assets, ...(account.assets ?? [])],
-        (a) => `${a.marketType}:${a.symbol?.name}`,
+        (a) => `${a.marketType}:${a.instrument?.symbol}`,
       );
 
       // =============================================================
@@ -108,7 +108,7 @@ export class ConnectorBuilder {
       // =============================================================
       connector.positions = this.dedupByKey(
         [...connector.positions, ...(account.positions ?? [])],
-        (p) => `${p.marketType}:${p.symbol?.name}:${p.side}`,
+        (p) => `${p.marketType}:${p.instrument?.symbol}:${p.side}`,
       );
 
       // =============================================================

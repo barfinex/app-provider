@@ -7,7 +7,7 @@ import {
   ConnectorType,
   OrderSourceType,
   OrderSource,
-  TradingSymbol,
+  Instrument,
 } from '@barfinex/types';
 
 import { OrderEntity, OrderRepository } from './order.repository';
@@ -34,8 +34,8 @@ export class OrderService {
   async getOpenOrders(options: {
     connectorType: ConnectorType;
     marketType: MarketType;
-    symbol?: TradingSymbol;
-    symbols: TradingSymbol[];
+    instrument?: Instrument;
+    instruments: Instrument[];
     useSandbox?: boolean;
     source: OrderSource;
     query?: { limit?: number; page?: number; search?: string };
@@ -43,8 +43,8 @@ export class OrderService {
     const {
       connectorType,
       marketType,
-      symbol,
-      symbols,
+      instrument,
+      instruments,
       source,
       useSandbox,
       query,
@@ -64,8 +64,8 @@ export class OrderService {
 
     // SANDBOX
     if (useSandbox) {
-      const where = symbol
-        ? `sourceSysname='${sourceSysname}' AND sourceType='${sourceType}' AND symbol='${symbol.name}'`
+      const where = instrument
+        ? `sourceSysname='${sourceSysname}' AND sourceType='${sourceType}' AND symbol='${instrument.symbol}'`
         : `sourceSysname='${sourceSysname}' AND sourceType='${sourceType}'`;
 
       const [rows, count] = await this.orderRepository.findAndCount(
@@ -91,19 +91,19 @@ export class OrderService {
 
     let connectorOrders: Order[] = [];
 
-    if (symbol) {
+    if (instrument) {
       connectorOrders = await this.connectorService.getOpenOrders({
         source,
-        symbol,
+        instrument,
         connectorType,
         marketType,
       });
     } else {
-      for (const s of symbols) {
+      for (const s of instruments) {
         try {
           const list = await this.connectorService.getOpenOrders({
             source,
-            symbol: s,
+            instrument: s,
             connectorType,
             marketType,
           });
@@ -153,18 +153,18 @@ export class OrderService {
   // ============================================================================
 
   async getOpenOrdersCount(options: {
-    symbols: TradingSymbol[];
+    instruments: Instrument[];
     sourceSysname: string;
     sourceType: OrderSourceType;
   }) {
-    const { symbols, sourceSysname, sourceType } = options;
+    const { instruments, sourceSysname, sourceType } = options;
 
-    const result: Array<{ symbol: TradingSymbol; ordersCount: number }> = [];
+    const result: Array<{ instrument: Instrument; ordersCount: number }> = [];
 
-    for (const s of symbols) {
-      const where = `sourceSysname='${sourceSysname}' AND sourceType='${sourceType}' AND symbol='${s.name}'`;
+    for (const s of instruments) {
+      const where = `sourceSysname='${sourceSysname}' AND sourceType='${sourceType}' AND symbol='${s.symbol}'`;
       const count = await this.orderRepository.count(where);
-      result.push({ symbol: s, ordersCount: count });
+      result.push({ instrument: s, ordersCount: count });
     }
 
     return result;
@@ -270,7 +270,7 @@ export class OrderService {
       externalId: order.externalId ?? null,
       connectorType: order.connectorType,
       marketType: order.marketType,
-      symbol: order.symbol?.name ?? '',
+      symbol: order.instrument?.symbol ?? '',
 
       side: order.side ?? null,
       type: order.type ?? null,
@@ -300,7 +300,7 @@ export class OrderService {
     return {
       id: entity.id,
       externalId: entity.externalId,
-      symbol: { name: entity.symbol },
+      instrument: { symbol: entity.symbol },
       connectorType: entity.connectorType as ConnectorType,
       marketType: entity.marketType as MarketType,
       side: entity.side as OrderSide,

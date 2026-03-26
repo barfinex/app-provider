@@ -5,13 +5,13 @@ import {
   ALL_CANDLE_INTERVALS,
   ConnectorType,
   MarketType,
-  TradingSymbol,
+  Instrument,
   TimeFrame,
 } from '@barfinex/types';
 import { ConfigService } from '@barfinex/config';
 
 import { HistoryLoaderService } from '../history/history-loader.service';
-import { SymbolHistoryService } from '../history/symbol-history.service';
+import { InstrumentHistoryService } from '../history/instrument-history.service';
 import { CandleQueryService } from '../candle-query.service';
 import { RequestFactoryService } from '../providers/request-factory.service';
 import { CandleWarmupGateService } from '../warmup/candle-warmup-gate.service';
@@ -27,14 +27,14 @@ export { CANDLE_SUBSCRIPTIONS_UPDATED };
 export interface CandleSubscriptionsUpdatedPayload {
   connectorType: ConnectorType;
   marketType: MarketType;
-  symbols: TradingSymbol[];
+  instruments: Instrument[];
   intervals: TimeFrame[];
 }
 
 interface StoredSubscription {
   connectorType: ConnectorType;
   marketType: MarketType;
-  symbols: TradingSymbol[];
+  instruments: Instrument[];
   intervals: TimeFrame[];
 }
 
@@ -107,7 +107,7 @@ export class CandleSyncService implements OnModuleInit {
   constructor(
     private readonly configService: ConfigService,
     private readonly historyLoader: HistoryLoaderService,
-    private readonly symbolHistory: SymbolHistoryService,
+    private readonly symbolHistory: InstrumentHistoryService,
     private readonly candleQuery: CandleQueryService,
     private readonly requestFactory: RequestFactoryService,
     private readonly warmupGate: CandleWarmupGateService,
@@ -216,10 +216,10 @@ export class CandleSyncService implements OnModuleInit {
     )} connectorType=${ctx.connectorType} marketType=${ctx.marketType}]`;
   }
 
-  private filterWarmupSymbols(symbols: TradingSymbol[]): TradingSymbol[] {
+  private filterWarmupSymbols(instruments: Instrument[]): Instrument[] {
     const skip = new Set<string>(['USDT', 'BUSD', 'USDC', 'FDUSD', 'TUSD']);
-    return symbols.filter((s) => {
-      const name = (typeof s === 'string' ? s : s.name || '').toUpperCase();
+    return instruments.filter((s) => {
+      const name = (typeof s === 'string' ? s : s.symbol || '').toUpperCase();
       if (skip.has(name)) return false;
       if (name.length < 6) return false;
       return true;
@@ -234,16 +234,16 @@ export class CandleSyncService implements OnModuleInit {
   async onSubscriptionsUpdated(
     payload: CandleSubscriptionsUpdatedPayload,
   ): Promise<void> {
-    if (!payload?.symbols?.length || !payload?.intervals?.length) {
+    if (!payload?.instruments?.length || !payload?.intervals?.length) {
       this.logger.warn(
-        `Candle sync skipped: no symbols or intervals (symbols=${
-          payload?.symbols?.length ?? 0
+        `Candle sync skipped: no instruments or intervals (instruments=${
+          payload?.instruments?.length ?? 0
         }, intervals=${payload?.intervals?.length ?? 0})`,
       );
       return;
     }
 
-    const { connectorType, marketType, symbols, intervals } = payload;
+    const { connectorType, marketType, instruments, intervals } = payload;
 
     if (!this.isConnectorSupported(connectorType)) {
       this.logger.debug(
@@ -252,11 +252,11 @@ export class CandleSyncService implements OnModuleInit {
       return;
     }
 
-    const symbolsFiltered = this.filterWarmupSymbols(symbols);
-    if (symbolsFiltered.length < symbols.length) {
+    const symbolsFiltered = this.filterWarmupSymbols(instruments);
+    if (symbolsFiltered.length < instruments.length) {
       this.logger.debug(
         `Warmup: skipped ${
-          symbols.length - symbolsFiltered.length
+          instruments.length - symbolsFiltered.length
         } non-tradeable symbols (e.g. USDT alone)`,
       );
     }
@@ -280,7 +280,7 @@ export class CandleSyncService implements OnModuleInit {
     this.state.set(key, {
       connectorType,
       marketType,
-      symbols: [...symbolsFiltered],
+      instruments: [...symbolsFiltered],
       intervals: supportedIntervals.length
         ? supportedIntervals
         : [TimeFrame.min1],
@@ -301,7 +301,7 @@ export class CandleSyncService implements OnModuleInit {
     const sub = this.state.get(key);
     if (!sub) return;
 
-    const { connectorType, marketType, symbols, intervals } = sub;
+    const { connectorType, marketType, instruments, intervals } = sub;
     if (
       !this.ownershipService.isActiveOwnerForConnectorMarket(
         connectorType,
@@ -330,10 +330,10 @@ export class CandleSyncService implements OnModuleInit {
 
     try {
       this.logger.log(
-        `Subscriptions updated: ${key}, symbols=${symbols.length}, intervals=${intervals.length}. Starting warmup.`,
+        `Subscriptions updated: ${key}, symbols=${instruments.length}, intervals=${intervals.length}. Starting warmup.`,
       );
 
-      await this.runWarmup(connectorType, marketType, symbols, intervals);
+      await this.runWarmup(connectorType, marketType, instruments, intervals);
     } finally {
       this.warmupGate.setWarmupRunning(
         String(connectorType),
@@ -358,7 +358,7 @@ export class CandleSyncService implements OnModuleInit {
   private async warmupOneSymbolInterval(
     connectorType: ConnectorType,
     marketType: MarketType,
-    s: TradingSymbol,
+    s: Instrument,
     interval: TimeFrame,
     requestFn:
       | ((
@@ -371,7 +371,7 @@ export class CandleSyncService implements OnModuleInit {
     now: number,
     lookbackDays: number,
   ): Promise<void> {
-    const symbolName = typeof s === 'string' ? s : s.name;
+    const symbolName = typeof s === 'string' ? s : s.symbol;
     const ctx = {
       symbol: symbolName,
       tf: interval,
@@ -463,7 +463,7 @@ export class CandleSyncService implements OnModuleInit {
         const candles = await this.historyLoader.getHistory({
           connectorType: ctx.connectorType as ConnectorType,
           marketType: ctx.marketType as MarketType,
-          symbols: [s],
+          instruments: [s],
           interval: ctx.tf,
           days: lookbackDays,
           gapDays: 0,
@@ -485,7 +485,7 @@ export class CandleSyncService implements OnModuleInit {
   private async runWarmup(
     connectorType: ConnectorType,
     marketType: MarketType,
-    symbols: TradingSymbol[],
+    instruments: Instrument[],
     intervals: TimeFrame[],
     warmupDaysOverride?: number, // legacy compatibility; prefer per-interval lookback
   ): Promise<void> {
@@ -530,7 +530,7 @@ export class CandleSyncService implements OnModuleInit {
     }
 
     const tasks: Array<{
-      symbol: TradingSymbol;
+      instrument: Instrument;
       interval: TimeFrame;
       lookbackDays: number;
     }> = [];
@@ -545,8 +545,8 @@ export class CandleSyncService implements OnModuleInit {
           `[Warmup] lookbackDays=${lookbackDays} interval=${interval} connector=${connectorType} market=${marketType}`,
         );
       }
-      for (const s of symbols) {
-        tasks.push({ symbol: s, interval, lookbackDays });
+      for (const s of instruments) {
+        tasks.push({ instrument: s, interval, lookbackDays });
       }
     }
 
@@ -571,7 +571,7 @@ export class CandleSyncService implements OnModuleInit {
 
         const task = tasks[taskIndex];
         const symbolName =
-          typeof task.symbol === 'string' ? task.symbol : task.symbol.name;
+          typeof task.instrument === 'string' ? task.instrument : task.instrument.symbol;
         progress += 1;
         this.logger.log(
           `[CandleWarmup] symbol=${symbolName} interval=${task.interval} task=${progress}/${totalTasks}`,
@@ -580,7 +580,7 @@ export class CandleSyncService implements OnModuleInit {
         await this.warmupOneSymbolInterval(
           connectorType,
           marketType,
-          task.symbol,
+          task.instrument,
           task.interval,
           requestFn,
           now,
@@ -594,11 +594,11 @@ export class CandleSyncService implements OnModuleInit {
     await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
 
     this.logger.log(
-      `Warmup done: ${connectorType}:${marketType}, ${symbols.length} symbols, ${warmupIntervals.length} intervals`,
+      `Warmup done: ${connectorType}:${marketType}, ${instruments.length} symbols, ${warmupIntervals.length} intervals`,
     );
     this.warmupGate.setWarmupCompleted(true);
     this.logger.log(
-      `[Warmup] Key completed: ${connectorType}:${marketType} symbols=${symbols.length} intervals=${warmupIntervals.length}`,
+      `[Warmup] Key completed: ${connectorType}:${marketType} symbols=${instruments.length} intervals=${warmupIntervals.length}`,
     );
   }
 
@@ -628,7 +628,7 @@ export class CandleSyncService implements OnModuleInit {
 
     const now = Date.now();
     for (const [, sub] of this.state) {
-      const { connectorType, marketType, symbols, intervals } = sub;
+      const { connectorType, marketType, instruments, intervals } = sub;
       const safeIntervals = intervals.filter((tf) =>
         ALL_CANDLE_INTERVALS.includes(tf),
       );
@@ -654,8 +654,8 @@ export class CandleSyncService implements OnModuleInit {
           `[Backfill] lookbackDays=${lookbackDays} interval=${interval} connector=${connectorType} market=${marketType}`,
         );
 
-        for (const s of symbols) {
-          const symbolName = typeof s === 'string' ? s : s.name;
+        for (const s of instruments) {
+          const symbolName = typeof s === 'string' ? s : s.symbol;
           if (!symbolName) continue;
 
           try {

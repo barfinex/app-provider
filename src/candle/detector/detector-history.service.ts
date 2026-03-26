@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { TimeFrame, TradingSymbol, Candle } from '@barfinex/types';
+import { TimeFrame, Instrument, Candle } from '@barfinex/types';
 import { DetectorService } from '../../detector/detector.service';
 import { CandleQueryService } from '../candle-query.service';
 
@@ -12,11 +12,11 @@ export class DetectorHistoryService {
 
   async getByDetectorSysname(
     detectorSysname: string,
-    symbol: string | TradingSymbol,
+    symbol: string | Instrument,
     interval: TimeFrame,
   ): Promise<Candle[]> {
     // ✅ ЕДИНАЯ НОРМАЛИЗАЦИЯ
-    const symbolName = typeof symbol === 'string' ? symbol : symbol.name;
+    const symbolName = typeof symbol === 'string' ? symbol : symbol.symbol;
 
     const detector = await this.detectorService.getDetector({
       sysname: detectorSysname,

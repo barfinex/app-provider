@@ -13,7 +13,7 @@ import {
 import { DetectorService } from './detector.service';
 import { ConnectorService } from '../connector/connector.service';
 
-import { Detector, DetectorListItem, TradingSymbol, TimeFrame } from '@barfinex/types';
+import { Detector, DetectorListItem, Instrument, TimeFrame } from '@barfinex/types';
 import {
   ApiOperation,
   ApiQuery,
@@ -284,7 +284,7 @@ export class DetectorController {
           await this.detectorService.updateSubscribeCollectionInConnector({
             connectorType: connector.connectorType,
             marketType: market.marketType,
-            symbols: activeSymbols,
+            instruments: activeSymbols,
             intervals: options.intervals,
           });
         }
@@ -332,7 +332,7 @@ export class DetectorController {
           await this.detectorService.updateSubscribeCollectionInConnector({
             connectorType: connector.connectorType,
             marketType: market.marketType,
-            symbols: activeSymbols,
+            instruments: activeSymbols,
             intervals: detector.intervals,
           });
         }
@@ -379,10 +379,10 @@ export class DetectorController {
   @ApiParam({ name: 'key', description: 'Detector key or sysname' })
   @ApiResponse({
     status: 200,
-    description: 'Array of symbol names or Symbol objects',
+    description: 'Array of instrument names or Instrument objects',
   })
   async getDetectorSymbols(@Param('key') key: string) {
-    return this.detectorService.getSymbols(key);
+    return this.detectorService.getInstruments(key);
   }
 
   @Get(':key/symbols/:symbol')
@@ -393,7 +393,7 @@ export class DetectorController {
   })
   @ApiParam({ name: 'key', description: 'Detector key or sysname' })
   @ApiParam({ name: 'symbol', description: 'Trading symbol (e.g. BTCUSDT)' })
-  @ApiResponse({ status: 200, description: 'Symbol state object' })
+  @ApiResponse({ status: 200, description: 'Instrument state object' })
   async getDetectorSymbolState(
     @Param('key') key: string,
     @Param('symbol') symbol: string,
@@ -449,9 +449,9 @@ export class DetectorController {
     @Query() reqParams: any,
   ) {
     const { orderBy } = reqParams;
-    return this.detectorService.getSymbolCandlesState({
+    return this.detectorService.getInstrumentCandlesState({
       key,
-      symbol: { name: symbol },
+      instrument: { symbol: symbol },
       interval,
       orderBy,
     });
@@ -508,7 +508,7 @@ export class DetectorController {
 
     return this.detectorService.getSymbolIndocatorState({
       key,
-      symbol: { name: symbol },
+      instrument: { symbol: symbol },
       selectIndicators,
       interval,
     });

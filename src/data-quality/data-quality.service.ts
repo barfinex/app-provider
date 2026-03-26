@@ -1,5 +1,5 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
-import { BinanceService } from '../connector/datasource/binance/binance.service';
+import { ExchangeDataService } from '../connector/datasource/exchange/exchange-data.service';
 import { QuestDBQueryService } from '../questdb/questdb-query.service';
 import {
   MARKET_DATA_LAG_WARNING_MS,
@@ -14,10 +14,10 @@ import {
   DataMaturityLevel,
   DataQualityIssueCategory,
   type DataQualityIssue,
-  type SymbolDataQualityStatus,
+  type InstrumentDataQualityStatus,
   type AdvisorDecisionReadinessStatus,
   type ProviderDataQualityOverviewResponse,
-  type ProviderSymbolDataQualityResponse,
+  type ProviderInstrumentDataQualityResponse,
   type DataQualityDesktopPayload,
   type AdvisorStatusType,
 } from '@barfinex/types';
@@ -48,7 +48,7 @@ export class DataQualityService {
   );
 
   constructor(
-    private readonly binanceService: BinanceService,
+    private readonly exchangeDataService: ExchangeDataService,
     private readonly reader: QuestDBQueryService,
     @Optional() private readonly advisorProxy?: AdvisorProxyService,
   ) {}
@@ -84,7 +84,7 @@ export class DataQualityService {
   }
 
   /**
-   * Last timestamps from runtime (BinanceService market quality snapshots).
+   * Last timestamps from runtime (ExchangeDataService market quality snapshots).
    * Candles: prefer candleEventTimestamp (stream heartbeat) when present so lag = time since last kline event.
    */
   private getRuntimeStreamTimestamps(): {
@@ -93,13 +93,13 @@ export class DataQualityService {
     candles: number | null;
     candlesFromEventTs: boolean;
   } {
-    const symbols = this.binanceService.getSymbolsWithMarketQualitySnapshots();
+    const symbols = this.exchangeDataService.getInstrumentsWithMarketQualitySnapshots();
     let tradeTs: number | null = null;
     let obTs: number | null = null;
     let candleTs: number | null = null;
     let candlesFromEventTs = false;
     for (const symbol of symbols) {
-      const snapshot = this.binanceService.getMarketQualitySnapshot(symbol);
+      const snapshot = this.exchangeDataService.getMarketQualitySnapshot(symbol);
       if (!snapshot?.timestamps) continue;
       const t = Number(snapshot.timestamps.tradeTimestamp ?? 0);
       const o = Number(snapshot.timestamps.orderbookTimestamp ?? 0);
@@ -263,22 +263,22 @@ export class DataQualityService {
     };
   }
 
-  async getSymbolDataQuality(
+  async getInstrumentDataQuality(
     symbol: string,
-  ): Promise<SymbolDataQualityStatus | null> {
+  ): Promise<InstrumentDataQualityStatus | null> {
     const normalized = String(symbol || '')
       .trim()
       .toUpperCase();
     if (!normalized) return null;
-    const snapshot = this.binanceService.getMarketQualitySnapshot(normalized);
+    const snapshot = this.exchangeDataService.getMarketQualitySnapshot(normalized);
     const report = snapshot
-      ? this.binanceService.getMarketQualityReport(normalized, snapshot)
+      ? this.exchangeDataService.getMarketQualityReport(normalized, snapshot)
       : null;
     const now = Date.now();
 
     if (!report) {
       const suggestedAction = 'reload_candle_history';
-      const status: SymbolDataQualityStatus = {
+      const status: InstrumentDataQualityStatus = {
         symbol: normalized,
         level: 'ERROR' as DataQualityLevel,
         maturity: 'INSUFFICIENT' as DataMaturityLevel,
@@ -395,12 +395,12 @@ export class DataQualityService {
     this.trimRecentByTtl();
     const now = Date.now();
     const streamStatus = await this.getStreamStatus();
-    const symbols = this.binanceService.getSymbolsWithMarketQualitySnapshots();
-    const symbolStatuses: SymbolDataQualityStatus[] = [];
+    const symbols = this.exchangeDataService.getInstrumentsWithMarketQualitySnapshots();
+    const symbolStatuses: InstrumentDataQualityStatus[] = [];
     let blockedCount = 0;
     let warningCount = 0;
     for (const symbol of symbols.slice(0, 200)) {
-      const s = await this.getSymbolDataQuality(symbol);
+      const s = await this.getInstrumentDataQuality(symbol);
       if (s) {
         symbolStatuses.push(s);
         if (!s.advisorEligible) blockedCount += 1;
@@ -474,10 +474,10 @@ export class DataQualityService {
     };
   }
 
-  async getSymbol(
+  async getInstrument(
     symbol: string,
-  ): Promise<ProviderSymbolDataQualityResponse | null> {
-    const status = await this.getSymbolDataQuality(symbol);
+  ): Promise<ProviderInstrumentDataQualityResponse | null> {
+    const status = await this.getInstrumentDataQuality(symbol);
     if (!status) return null;
     const advisorReadiness = await this.fetchAdvisorReadinessForSymbol(symbol);
     return {
@@ -489,13 +489,13 @@ export class DataQualityService {
 
   async getIssues(): Promise<DataQualityIssue[]> {
     this.trimRecentByTtl();
-    const symbols = this.binanceService.getSymbolsWithMarketQualitySnapshots();
+    const symbols = this.exchangeDataService.getInstrumentsWithMarketQualitySnapshots();
     const all: DataQualityIssue[] = [
       ...this.recentErrors,
       ...this.recentWarnings,
     ];
     for (const symbol of symbols.slice(0, 100)) {
-      const s = await this.getSymbolDataQuality(symbol);
+      const s = await this.getInstrumentDataQuality(symbol);
       if (s?.issues?.length) all.push(...s.issues);
     }
     return all
@@ -674,9 +674,9 @@ export class DataQualityService {
    */
   private filterActiveIssues(
     issues: DataQualityIssue[],
-    symbolStatuses: SymbolDataQualityStatus[],
+    symbolStatuses: InstrumentDataQualityStatus[],
   ): DataQualityIssue[] {
-    const bySymbol = new Map<string, SymbolDataQualityStatus>();
+    const bySymbol = new Map<string, InstrumentDataQualityStatus>();
     for (const s of symbolStatuses) bySymbol.set(s.symbol, s);
     return issues.filter((issue) => {
       const sym = issue.symbol;

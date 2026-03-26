@@ -11,7 +11,7 @@ import { CandleQueryService } from './candle-query.service';
 
 // 🔹 новые сервисы после декомпозиции
 import { HistoryLoaderService } from './history/history-loader.service';
-import { SymbolHistoryService } from './history/symbol-history.service';
+import { InstrumentHistoryService } from './history/instrument-history.service';
 import { HigherTFService } from './history/higher-tf.service';
 
 import { RequestFactoryService } from './providers/request-factory.service';
@@ -65,7 +65,7 @@ import { OwnershipModule } from '../ownership/ownership.module';
 
     // History pipeline (НОВЫЕ)
     HistoryLoaderService,
-    SymbolHistoryService,
+    InstrumentHistoryService,
     HigherTFService,
 
     // Providers

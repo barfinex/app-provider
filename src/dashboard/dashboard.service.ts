@@ -173,7 +173,7 @@ export class DashboardService {
         assetCount += 1;
         const walletBalance = Number(asset?.walletBalance ?? 0);
         const availableBalance = Number(asset?.availableBalance ?? 0);
-        const symbol = String(asset?.symbol?.name ?? '').toUpperCase();
+        const symbol = String(asset?.instrument?.symbol ?? '').toUpperCase();
         const unitPrice = this.resolveAssetUnitPriceUsd(asset, symbol);
 
         if (unitPrice === null) {
@@ -209,7 +209,7 @@ export class DashboardService {
 
         if (notional > maxPositionNotional) {
           maxPositionNotional = notional;
-          maxPositionSymbol = String(position?.symbol?.name ?? '');
+          maxPositionSymbol = String(position?.instrument?.symbol ?? '');
         }
 
         if (qty > 0 && entry > 0 && last > 0) {

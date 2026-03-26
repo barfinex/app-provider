@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Put } from '@nestjs/common';
-import { Account, MarketType, ConnectorType, TradingSymbol } from '@barfinex/types';
+import { Account, MarketType, ConnectorType, Instrument } from '@barfinex/types';
 import { AccountService } from './account.service';
 import {
   ApiTags,
@@ -43,13 +43,13 @@ export class AccountController {
   @ApiBody({ description: 'symbol, leverage, connectorType' })
   @ApiOkResponse({ description: 'Leverage update result' })
   async changeLeverage(
-    @Body('symbol') symbol: TradingSymbol,
+    @Body('symbol') instrument: Instrument,
     @Body('leverage') leverage: number,
     @Body('connectorType') connectorType: ConnectorType,
   ) {
     return await this.accountSecvice.changeLeverage(
       connectorType,
-      symbol,
+      instrument,
       leverage,
     );
   }

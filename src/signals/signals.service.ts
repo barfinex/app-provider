@@ -13,7 +13,7 @@ import {
 import { ContextBiasDetector, HtfRangeZoneDetector } from '@barfinex/detector';
 import { CandleService } from '../candle/candle.service';
 import { CandleQueryService } from '../candle/candle-query.service';
-import { BinanceService } from '../connector/datasource/binance/binance.service';
+import { ExchangeDataService } from '../connector/datasource/exchange/exchange-data.service';
 import { OrderBookRepository } from '../questdb/repositories/orderbook.repository';
 import { TradeRepository } from '../questdb/repositories/trade.repository';
 
@@ -50,7 +50,7 @@ export class SignalsService {
     private readonly candleQueryService: CandleQueryService,
     private readonly orderBookRepository: OrderBookRepository,
     private readonly tradeRepository: TradeRepository,
-    @Optional() private readonly binanceService?: BinanceService,
+    @Optional() private readonly exchangeDataService?: ExchangeDataService,
   ) {}
 
   async buildSignalContext(options: {
@@ -115,7 +115,7 @@ export class SignalsService {
 
     let orderBook = this.buildOrderBookSnapshot(symbol, orderBookRows ?? []);
     const orderFlow = this.buildOrderFlowSnapshot(symbol, trades ?? []);
-    const liveSnapshot = this.binanceService?.getMarketQualitySnapshot(symbol);
+    const liveSnapshot = this.exchangeDataService?.getMarketQualitySnapshot(symbol);
     // Enrich orderbook with live data when QuestDB is stale or incomplete
     if (liveSnapshot?.orderbook) {
       const live = liveSnapshot.orderbook;
@@ -617,7 +617,7 @@ export class SignalsService {
     close: number;
     volume: number;
   }> {
-    const snapshot = this.binanceService?.getMarketQualitySnapshot(symbol);
+    const snapshot = this.exchangeDataService?.getMarketQualitySnapshot(symbol);
     if (!snapshot) return [];
     const key: 'h1' | 'h4' | 'd1' =
       interval === TimeFrame.h4
@@ -717,7 +717,7 @@ export class SignalsService {
     interval: TimeFrame,
     days: number,
   ): Promise<any[]> {
-    const normalizedSymbol = String(symbol || '')
+    const normalizedInstrument = String(symbol || '')
       .trim()
       .toUpperCase();
     const normalizedConnectorType = String(connectorType || '')
@@ -729,7 +729,7 @@ export class SignalsService {
 
     const anchorTs =
       (await this.candleQueryService.loadLastTimestamp({
-        symbol: normalizedSymbol,
+        symbol: normalizedInstrument,
         connectorType: normalizedConnectorType,
         marketType: normalizedMarketType,
         interval,
@@ -737,7 +737,7 @@ export class SignalsService {
     const toMs = Math.trunc(anchorTs);
     const fromMs = toMs - this.daysToMs(days);
     const fromStore = await this.candleQueryService.loadRangeNormalized({
-      symbol: normalizedSymbol,
+      symbol: normalizedInstrument,
       connectorType: normalizedConnectorType,
       marketType: normalizedMarketType,
       interval,
@@ -748,7 +748,7 @@ export class SignalsService {
     if (normalizedFromStore.length > 0) {
       merged = this.mergeCandles(merged, normalizedFromStore);
       this.logger.log(
-        `[candles_source] symbol=${normalizedSymbol} tf=${interval} source=questdb_range count=${normalizedFromStore.length} from=${fromMs} to=${toMs}`,
+        `[candles_source] symbol=${normalizedInstrument} tf=${interval} source=questdb_range count=${normalizedFromStore.length} from=${fromMs} to=${toMs}`,
       );
     }
 
@@ -758,7 +758,7 @@ export class SignalsService {
         minRequired * 2,
       );
       const lastN = await this.candleQueryService.loadLastN(
-        normalizedSymbol,
+        normalizedInstrument,
         interval,
         fallbackCount,
       );
@@ -766,19 +766,19 @@ export class SignalsService {
       if (normalizedLastN.length > 0) {
         merged = this.mergeCandles(merged, normalizedLastN);
         this.logger.log(
-          `[candles_source] symbol=${normalizedSymbol} tf=${interval} source=questdb_lastN count=${normalizedLastN.length} limit=${fallbackCount}`,
+          `[candles_source] symbol=${normalizedInstrument} tf=${interval} source=questdb_lastN count=${normalizedLastN.length} limit=${fallbackCount}`,
         );
       }
     }
 
     if (merged.length < minRequired) {
       this.logger.log(
-        `[candles_source] symbol=${normalizedSymbol} tf=${interval} source=history_loader days=${days}`,
+        `[candles_source] symbol=${normalizedInstrument} tf=${interval} source=history_loader days=${days}`,
       );
       const historyCandles = await this.candleService.get(
         connectorType,
         normalizedMarketType as MarketType,
-        { name: normalizedSymbol },
+        { symbol: normalizedInstrument },
         interval,
         { days },
       );
@@ -790,20 +790,20 @@ export class SignalsService {
 
     if (merged.length < minRequired) {
       const liveCandles = this.getLiveSnapshotCandles(
-        normalizedSymbol,
+        normalizedInstrument,
         interval,
       );
       if (liveCandles.length > 0) {
         merged = this.mergeCandles(merged, liveCandles);
         this.logger.log(
-          `[candles_source] symbol=${normalizedSymbol} tf=${interval} source=live_snapshot count=${liveCandles.length}`,
+          `[candles_source] symbol=${normalizedInstrument} tf=${interval} source=live_snapshot count=${liveCandles.length}`,
         );
       }
     }
 
     if (merged.length < minRequired) {
       this.logger.log(
-        `[candles_source] symbol=${normalizedSymbol} tf=${interval} source=insufficient count=${merged.length} minRequired=${minRequired}`,
+        `[candles_source] symbol=${normalizedInstrument} tf=${interval} source=insufficient count=${merged.length} minRequired=${minRequired}`,
       );
     }
 

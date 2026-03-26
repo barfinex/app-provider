@@ -31,35 +31,35 @@ export class WebSocketService implements OnModuleDestroy {
   private sockets = new Map<string, SocketInfo>();
   private readonly maxRetries = Math.max(
     0,
-    Number(process.env.BINANCE_WS_MAX_RETRIES || 0),
+    Number(process.env.EXCHANGE_WS_MAX_RETRIES || 0),
   ); // 0 = unlimited retries
   private readonly baseDelay = Math.max(
     500,
-    Number(process.env.BINANCE_WS_RECONNECT_BASE_DELAY_MS || 5_000),
+    Number(process.env.EXCHANGE_WS_RECONNECT_BASE_DELAY_MS || 5_000),
   );
   private readonly maxDelay = Math.max(
     this.baseDelay,
-    Number(process.env.BINANCE_WS_RECONNECT_MAX_DELAY_MS || 30_000),
+    Number(process.env.EXCHANGE_WS_RECONNECT_MAX_DELAY_MS || 30_000),
   );
   private readonly reconnectJitterMs = Math.max(
     0,
-    Number(process.env.BINANCE_WS_RECONNECT_JITTER_MS || 1_500),
+    Number(process.env.EXCHANGE_WS_RECONNECT_JITTER_MS || 1_500),
   );
   private readonly stallThresholdMs = Math.max(
     1000,
-    Number(process.env.BINANCE_WS_STALL_THRESHOLD_MS || 5_000),
+    Number(process.env.EXCHANGE_WS_STALL_THRESHOLD_MS || 5_000),
   );
   private readonly stallCheckMs = Math.max(
     500,
-    Number(process.env.BINANCE_WS_STALL_CHECK_INTERVAL_MS || 1_000),
+    Number(process.env.EXCHANGE_WS_STALL_CHECK_INTERVAL_MS || 1_000),
   );
   private readonly stallCooldownMs = Math.max(
     1_000,
-    Number(process.env.BINANCE_WS_STALL_COOLDOWN_MS || 10_000),
+    Number(process.env.EXCHANGE_WS_STALL_COOLDOWN_MS || 10_000),
   );
   private readonly stallWarnThrottleMs = Math.max(
     1_000,
-    Number(process.env.BINANCE_WS_STALL_WARN_THROTTLE_MS || 10_000),
+    Number(process.env.EXCHANGE_WS_STALL_WARN_THROTTLE_MS || 10_000),
   );
   private readonly transientErrorWarnThrottleMs = 10_000;
   private lastTransientErrorAt = 0;

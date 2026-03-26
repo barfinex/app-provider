@@ -9,7 +9,7 @@ import { CandleRepository } from './repositories/candle.repository';
 import { TradeRepository } from './repositories/trade.repository';
 import { OrderRepository } from './repositories/order.repository';
 import { OrderBookRepository } from './repositories/orderbook.repository';
-import { SymbolRepository } from './repositories/symbol.repository';
+import { InstrumentRepository } from './repositories/instrument.repository';
 import { ConnectorRepository } from './repositories/connector.repository';
 import { DetectorRepository } from './repositories/detector.repository';
 import { InspectorRepository } from './repositories/inspector.repository';
@@ -40,7 +40,7 @@ import { EventSinkModule } from './event-sink/event-sink.module';
     TradeRepository,
     OrderRepository,
     OrderBookRepository,
-    SymbolRepository,
+    InstrumentRepository,
     ConnectorRepository,
     DetectorRepository,
     InspectorRepository,
@@ -62,7 +62,7 @@ import { EventSinkModule } from './event-sink/event-sink.module';
     TradeRepository,
     OrderRepository,
     OrderBookRepository,
-    SymbolRepository,
+    InstrumentRepository,
     ConnectorRepository,
     DetectorRepository,
     InspectorRepository,

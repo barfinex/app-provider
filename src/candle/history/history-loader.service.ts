@@ -1,9 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { History, TimeFrame, Candle, TradingSymbol } from '@barfinex/types';
+import { History, TimeFrame, Candle, Instrument } from '@barfinex/types';
 import { AppError, ErrorEnvironment } from '../../error';
 
 import { RequestFactoryService } from '../providers/request-factory.service';
-import { SymbolHistoryService } from './symbol-history.service';
+import { InstrumentHistoryService } from './instrument-history.service';
 import { roundDay, DAY } from '../time/time.utils';
 
 interface WarmupLogMeta {
@@ -23,7 +23,7 @@ export class HistoryLoaderService {
 
   constructor(
     private readonly requestFactory: RequestFactoryService,
-    private readonly symbolHistory: SymbolHistoryService,
+    private readonly symbolHistory: InstrumentHistoryService,
   ) {}
 
   private warmupPrefix(meta: WarmupLogMeta): string {
@@ -49,7 +49,7 @@ export class HistoryLoaderService {
     const {
       connectorType,
       marketType,
-      symbols,
+      instruments,
       interval,
       days,
       gapDays,
@@ -71,8 +71,8 @@ export class HistoryLoaderService {
 
     const result: Candle[] = [];
 
-    for (const s of symbols) {
-      const symbol = typeof s === 'string' ? s : s.name;
+    for (const s of instruments) {
+      const symbol = typeof s === 'string' ? s : s.symbol;
       const ctx =
         logMeta?.ctx ??
         ({
@@ -109,7 +109,7 @@ export class HistoryLoaderService {
   async getSingle(args: {
     connectorType: any;
     marketType: any;
-    symbol: TradingSymbol;
+    instrument: Instrument;
     interval: TimeFrame;
     days?: number;
   }) {
@@ -125,7 +125,7 @@ export class HistoryLoaderService {
     return this.getHistory({
       connectorType: args.connectorType,
       marketType: args.marketType,
-      symbols: [args.symbol],
+      instruments: [args.instrument],
       interval: args.interval,
       days,
       gapDays: 0,

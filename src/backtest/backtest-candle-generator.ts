@@ -82,7 +82,7 @@ export function generateSyntheticCandles(
       volume,
       time: candleTime,
       interval: params.interval,
-      symbol: { name: params.symbol },
+      instrument: { symbol: params.symbol },
     });
 
     price = close;

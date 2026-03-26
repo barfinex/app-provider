@@ -37,7 +37,7 @@ import {
   MarketType,
   Order,
   OrderSourceType,
-  TradingSymbol,
+  Instrument,
 } from '@barfinex/types';
 
 @ApiTags('Orders')
@@ -209,15 +209,15 @@ export class OrderController {
     const targetMarket = connector.markets?.find(
       (m) => m.marketType === marketType,
     );
-    const symbols = targetMarket?.symbols ?? [];
+    const instruments = targetMarket?.instruments ?? [];
 
-    if (!symbols.length) return [];
+    if (!instruments.length) return [];
 
     const providerKey = this.connectorService.key || 'provider';
     const openOrders = await this.orderService.getOpenOrders({
       connectorType,
       marketType,
-      symbols,
+      instruments,
       source: {
         key: providerKey,
         type: OrderSourceType.provider,
@@ -262,7 +262,7 @@ export class OrderController {
               type: OrderSourceType.detector,
               restApiUrl: null,
             },
-            symbols: market.symbols,
+            instruments: market.instruments,
             query,
           });
 
@@ -288,7 +288,7 @@ export class OrderController {
   @ApiParam({ name: 'sysname', description: 'Detector system name' })
   @ApiOkResponse({ description: 'Array of { symbol, ordersCount }' })
   async allCountByDetector(@Param('sysname') sysname: string) {
-    const result: Array<{ symbol: TradingSymbol; ordersCount: number }> = [];
+    const result: Array<{ instrument: Instrument; ordersCount: number }> = [];
 
     const detector = await this.detectorService.getDetector({ sysname });
 
@@ -298,7 +298,7 @@ export class OrderController {
           const counts = await this.orderService.getOpenOrdersCount({
             sourceSysname: sysname,
             sourceType: OrderSourceType.detector,
-            symbols: market.symbols,
+            instruments: market.instruments,
           });
 
           result.push(...counts);
@@ -333,7 +333,7 @@ export class OrderController {
   ) {
     const result: Array<{ id: string; order: Order }> = [];
 
-    const symbolObj: TradingSymbol = { name: symbolName };
+    const symbolObj: Instrument = { symbol: symbolName };
 
     const detector = await this.detectorService.getDetector({ sysname });
 
@@ -343,14 +343,14 @@ export class OrderController {
           const openOrders = await this.orderService.getOpenOrders({
             connectorType: connector.connectorType,
             marketType: market.marketType,
-            symbol: symbolObj,
+            instrument: symbolObj,
             useSandbox: detector.useSandbox,
             source: {
               key: sysname,
               type: OrderSourceType.detector,
               restApiUrl: null,
             },
-            symbols: market.symbols,
+            instruments: market.instruments,
             query,
           });
 

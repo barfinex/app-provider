@@ -14,7 +14,7 @@ import {
   Position,
   ConnectorType,
   MarketType,
-  TradingSymbol,
+  Instrument,
   OrderSource,
   Subscription,
   SubscriptionType,
@@ -114,11 +114,11 @@ export class ConnectorService implements OnModuleInit, OnModuleDestroy {
     return this.readService.getAssetsInfo(connectorType, marketType);
   }
 
-  async getSymbolsInfo(
+  async getInstrumentsInfo(
     connectorType: ConnectorType,
     marketType: MarketType,
-  ): Promise<TradingSymbol[]> {
-    return this.readService.getSymbolsInfo(connectorType, marketType);
+  ): Promise<Instrument[]> {
+    return this.readService.getInstrumentsInfo(connectorType, marketType);
   }
 
   async getAccountInfo(connectorType: ConnectorType, marketType: MarketType) {
@@ -128,9 +128,9 @@ export class ConnectorService implements OnModuleInit, OnModuleDestroy {
   async getPrices(
     connectorType: ConnectorType,
     marketType: MarketType,
-    symbols: TradingSymbol[],
+    instruments: Instrument[],
   ) {
-    return this.readService.getPrices(connectorType, marketType, symbols);
+    return this.readService.getPrices(connectorType, marketType, instruments);
   }
 
   async all(): Promise<Connector[]> {
@@ -150,10 +150,10 @@ export class ConnectorService implements OnModuleInit, OnModuleDestroy {
 
   async changeLeverage(
     connectorType: ConnectorType,
-    symbol: TradingSymbol,
+    instrument: Instrument,
     newLeverage: number,
-  ): Promise<TradingSymbol> {
-    return this.tradeService.changeLeverage(connectorType, symbol, newLeverage);
+  ): Promise<Instrument> {
+    return this.tradeService.changeLeverage(connectorType, instrument, newLeverage);
   }
 
   async openOrder(order: Order): Promise<Order> {
@@ -165,7 +165,7 @@ export class ConnectorService implements OnModuleInit, OnModuleDestroy {
   }
 
   async closeAllOrders(options: {
-    symbol: TradingSymbol;
+    instrument: Instrument;
     connectorType: ConnectorType;
     marketType: MarketType;
   }): Promise<void> {
@@ -173,7 +173,7 @@ export class ConnectorService implements OnModuleInit, OnModuleDestroy {
   }
 
   async getOpenOrders(options: {
-    symbol: TradingSymbol;
+    instrument: Instrument;
     source: OrderSource;
     connectorType: ConnectorType;
     marketType: MarketType;
@@ -195,13 +195,13 @@ export class ConnectorService implements OnModuleInit, OnModuleDestroy {
   async subscribeCollection(
     connectorType: ConnectorType,
     marketType: MarketType,
-    symbols: TradingSymbol[],
+    instruments: Instrument[],
     intervals: TimeFrame[],
   ) {
     return this.subscriptionService.subscribeCollection(
       connectorType,
       marketType,
-      symbols,
+      instruments,
       intervals,
     );
   }
@@ -213,7 +213,7 @@ export class ConnectorService implements OnModuleInit, OnModuleDestroy {
   async updateSubscribeCollection(
     connectorType: ConnectorType,
     marketType: MarketType,
-    symbols: TradingSymbol[],
+    instruments: Instrument[],
     intervals?: TimeFrame[],
     pipelineMeta?: {
       rawAssetsCount?: number;
@@ -223,7 +223,7 @@ export class ConnectorService implements OnModuleInit, OnModuleDestroy {
     return this.subscriptionService.updateSubscribeCollection(
       connectorType,
       marketType,
-      symbols,
+      instruments,
       intervals,
       pipelineMeta,
     );

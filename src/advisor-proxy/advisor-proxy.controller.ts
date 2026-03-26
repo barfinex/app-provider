@@ -305,7 +305,7 @@ export class AdvisorProxyController {
 
   @Get('advisor/runtime/locks')
   @ApiOperation({
-    summary: 'Symbol locks',
+    summary: 'Instrument locks',
     description:
       'Returns currently held symbol locks in the decision pipeline.',
   })

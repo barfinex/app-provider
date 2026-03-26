@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { readFile } from 'fs/promises';
 import { resolve } from 'path';
-import { BinanceRedisService } from '../connector/datasource/binance/core/binance.redis';
-import { BinanceWsManager } from '../connector/datasource/binance/ws/binance.ws.manager';
+import { ExchangeRedisService } from '../connector/datasource/exchange/core/exchange-redis.service';
+import { BinanceWsManager } from '@barfinex/exchange-binance';
 import { QuestDBWriteService } from '../questdb/questdb-write.service';
 import { QuestDBDDLService } from '../questdb/questdb-ddl.service';
 import { ProviderMarketdataMetricsService } from './provider-marketdata-metrics.service';
@@ -58,7 +58,7 @@ export class ProviderRuntimeHealthService {
     ).toLowerCase() === 'true';
 
   constructor(
-    private readonly redis: BinanceRedisService,
+    private readonly redis: ExchangeRedisService,
     private readonly questdbWriter: QuestDBWriteService,
     private readonly questdbDdl: QuestDBDDLService,
     private readonly wsManager: BinanceWsManager,

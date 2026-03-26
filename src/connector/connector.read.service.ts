@@ -5,20 +5,23 @@ import {
   Position,
   ConnectorType,
   MarketType,
-  TradingSymbol,
+  Instrument,
+  ExchangeConnectorStatus,
 } from '@barfinex/types';
 
-import { BinanceService } from './datasource/binance/binance.service';
-import { SymbolRepository } from '../symbol/symbol.repository';
+import { ExchangeDataService } from './datasource/exchange/exchange-data.service';
+import { InstrumentRepository } from '../instrument/instrument.repository';
 import { ConnectorRegistry } from './connector.registry';
+import { ExchangeManagerService } from './exchange-manager/exchange-manager.service';
 
 @Injectable()
 export class ConnectorReadService {
   private readonly logger = new Logger(ConnectorReadService.name);
 
   constructor(
-    private readonly binanceService: BinanceService,
-    private readonly symbolRepository: SymbolRepository,
+    private readonly exchangeDataService: ExchangeDataService,
+    private readonly instrumentRepository: InstrumentRepository,
+    private readonly exchangeManager: ExchangeManagerService,
   ) {}
 
   // =========================================================================
@@ -28,34 +31,26 @@ export class ConnectorReadService {
     connectorType: ConnectorType,
     marketType: MarketType,
   ): Promise<{ assets: Asset[]; positions: Position[] }> {
-    switch (connectorType) {
-      case ConnectorType.binance:
-        return this.binanceService.getAssetsInfo(marketType);
-
-      default:
-        this.logger.error(
-          `[ConnectorReadService] Unsupported connector: ${connectorType}`,
-        );
-        throw new BadRequestException(
-          `Unsupported connector type: ${connectorType}`,
-        );
-    }
+    this.assertConnectorActive(connectorType, marketType);
+    // ExchangeDataService delegates to the correct exchange client
+    // based on connectorType resolved from config
+    return this.exchangeDataService.getAssetsInfo(marketType);
   }
 
   // =========================================================================
   // 🔹 SYMBOLS
   // =========================================================================
-  async getSymbolsInfo(
+  async getInstrumentsInfo(
     connectorType: ConnectorType,
     marketType: MarketType,
-  ): Promise<TradingSymbol[]> {
-    const entities = await this.symbolRepository.getByConnector(
+  ): Promise<Instrument[]> {
+    const entities = await this.instrumentRepository.getByConnector(
       connectorType,
       marketType,
     );
 
     return entities.map((e) => ({
-      name: e.symbol,
+      symbol: e.symbol,
       baseAsset: e.baseAsset,
       quoteAsset: e.quoteAsset,
       status: e.status,
@@ -71,21 +66,19 @@ export class ConnectorReadService {
     connectorType: ConnectorType,
     marketType: MarketType,
   ): Promise<any> {
-    switch (connectorType) {
-      case ConnectorType.binance:
-        return this.binanceService.getAccountInfo(marketType);
-
-      default:
-        return {
-          connectorType,
-          marketType,
-          assets: [],
-          positions: [],
-          orders: [],
-          symbols: [],
-          isActive: false,
-        };
+    const status = this.exchangeManager.getStatus(connectorType, marketType);
+    if (status === ExchangeConnectorStatus.INACTIVE) {
+      return {
+        connectorType,
+        marketType,
+        assets: [],
+        positions: [],
+        orders: [],
+        instruments: [],
+        isActive: false,
+      };
     }
+    return this.exchangeDataService.getAccountInfo(marketType);
   }
 
   // =========================================================================
@@ -94,20 +87,10 @@ export class ConnectorReadService {
   async getPrices(
     connectorType: ConnectorType,
     marketType: MarketType,
-    symbols: TradingSymbol[],
+    instruments: Instrument[],
   ): Promise<{ [index: string]: { value: number; moment: number } }> {
-    switch (connectorType) {
-      case ConnectorType.binance:
-        return this.binanceService.getPrices(marketType, symbols);
-
-      default:
-        this.logger.error(
-          `[ConnectorReadService] Unsupported connector: ${connectorType}`,
-        );
-        throw new BadRequestException(
-          `Unsupported connector type: ${connectorType}`,
-        );
-    }
+    this.assertConnectorActive(connectorType, marketType);
+    return this.exchangeDataService.getPrices(marketType, instruments as any);
   }
 
   // =========================================================================
@@ -164,5 +147,24 @@ export class ConnectorReadService {
     };
 
     return connector;
+  }
+
+  // =========================================================================
+  // 🔹 PRIVATE
+  // =========================================================================
+  private assertConnectorActive(
+    connectorType: ConnectorType,
+    marketType: MarketType,
+  ): void {
+    const status = this.exchangeManager.getStatus(connectorType, marketType);
+    if (
+      status !== ExchangeConnectorStatus.ACTIVE &&
+      status !== ExchangeConnectorStatus.CONNECTING &&
+      status !== ExchangeConnectorStatus.RECONNECTING
+    ) {
+      throw new BadRequestException(
+        `Connector ${connectorType}:${marketType} is not active (status: ${status})`,
+      );
+    }
   }
 }

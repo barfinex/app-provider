@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Candle, TimeFrame, Symbol as TSymbol } from '@barfinex/types';
+import { Candle, TimeFrame, Instrument } from '@barfinex/types';
 import { ms } from './time/time.utils';
 
 export interface LiveCandle extends Candle {
@@ -40,7 +40,7 @@ export class CandleCacheService {
          * time + symbol обязательны
          */
         time: bucketStart,
-        symbol: symbol as unknown as TSymbol,
+        instrument: symbol as unknown as Instrument,
         interval: tf,
 
         // --- LiveCandle fields ---

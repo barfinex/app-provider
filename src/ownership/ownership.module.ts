@@ -4,7 +4,7 @@ import { OWNERSHIP_STORE } from './ownership-store.interface';
 import { RedisOwnershipStore } from './redis-ownership.store';
 import { ProviderInstanceService } from './provider-instance.service';
 import { ProviderOwnershipService } from './provider-ownership.service';
-import { SymbolShardService } from './symbol-shard.service';
+import { InstrumentShardService } from './instrument-shard.service';
 
 @Module({
   imports: [ConfigModule],
@@ -15,12 +15,12 @@ import { SymbolShardService } from './symbol-shard.service';
       useClass: RedisOwnershipStore,
     },
     ProviderOwnershipService,
-    SymbolShardService,
+    InstrumentShardService,
   ],
   exports: [
     ProviderInstanceService,
     ProviderOwnershipService,
-    SymbolShardService,
+    InstrumentShardService,
   ],
 })
 export class OwnershipModule {}

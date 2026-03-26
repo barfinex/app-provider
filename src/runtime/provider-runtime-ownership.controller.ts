@@ -9,7 +9,7 @@ import {
 } from '@nestjs/swagger';
 import { ProviderInstanceService } from '../ownership/provider-instance.service';
 import { ProviderOwnershipService } from '../ownership/provider-ownership.service';
-import { SymbolShardService } from '../ownership/symbol-shard.service';
+import { InstrumentShardService } from '../ownership/instrument-shard.service';
 import { ProviderMetricsService } from './provider-metrics.service';
 import {
   ownershipScopeKey,
@@ -29,7 +29,7 @@ export class ProviderRuntimeOwnershipController {
   constructor(
     private readonly instance: ProviderInstanceService,
     private readonly ownership: ProviderOwnershipService,
-    private readonly symbolShardService: SymbolShardService,
+    private readonly instrumentShardService: InstrumentShardService,
     private readonly metrics: ProviderMetricsService,
   ) {}
 
@@ -109,7 +109,7 @@ export class ProviderRuntimeOwnershipController {
 
   @Get('shards')
   @ApiOperation({
-    summary: 'Symbol shard distribution',
+    summary: 'Instrument shard distribution',
     description:
       'Returns symbol sharding state: instance id, owned shards, shard count. Used for ingestion cluster and shard distribution.',
   })
@@ -120,9 +120,9 @@ export class ProviderRuntimeOwnershipController {
   })
   getShards() {
     const instanceId = this.instance.providerInstanceId;
-    const enabled = this.symbolShardService.isEnabled();
-    const shardCount = this.symbolShardService.getShardCount();
-    const localShardIds = this.symbolShardService.getLocalShardIds();
+    const enabled = this.instrumentShardService.isEnabled();
+    const shardCount = this.instrumentShardService.getShardCount();
+    const localShardIds = this.instrumentShardService.getLocalShardIds();
     const tracked = this.ownership.getTrackedScopes();
     const ownedShards = tracked
       .filter((s) => s.shardId !== undefined && s.shardId !== null)
@@ -166,7 +166,7 @@ export class ProviderRuntimeOwnershipController {
       .getTrackedScopes()
       .filter((s) => this.ownership.isActiveOwner(s))
       .map((s) => ownershipScopeKey(s));
-    const localShardIds = this.symbolShardService.getLocalShardIds();
+    const localShardIds = this.instrumentShardService.getLocalShardIds();
     const shards = localShardIds.map((id) => `shard${id}`);
     const { tradeRate, orderbookRate } = this.metrics.getMetrics();
     return [

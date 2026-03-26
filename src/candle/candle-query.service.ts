@@ -818,7 +818,7 @@ export class CandleQueryService {
       low: Number(row.low ?? 0),
       close: Number(row.close ?? 0),
       volume: Number(row.volume ?? 0),
-      symbol: { name: params.symbol } as any,
+      instrument: { symbol: params.symbol } as any,
       interval: params.interval,
     }));
   }

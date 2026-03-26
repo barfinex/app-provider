@@ -16,7 +16,7 @@ import {
   ApiSecurity,
 } from '@nestjs/swagger';
 import { ConnectorType, MarketType, TimeFrame } from '@barfinex/types';
-import { BinanceService } from '../connector/datasource/binance/binance.service';
+import { ExchangeDataService } from '../connector/datasource/exchange/exchange-data.service';
 import { CandleQueryService } from '../candle/candle-query.service';
 import { HorizontalVolumeProfileRepository } from '../questdb/repositories/horizontal-volume-profile.repository';
 import { MarketQualityDto } from '../dto';
@@ -27,7 +27,7 @@ import { MarketQualityDto } from '../dto';
 @Controller('provider/market-quality')
 export class ProviderMarketQualityController {
   constructor(
-    private readonly binanceService: BinanceService,
+    private readonly exchangeDataService: ExchangeDataService,
     private readonly candleQueryService: CandleQueryService,
     private readonly horizontalVolumeProfileRepository: HorizontalVolumeProfileRepository,
   ) {}
@@ -72,9 +72,9 @@ export class ProviderMarketQualityController {
     description: 'Market quality report',
     type: MarketQualityDto,
   })
-  @ApiNotFoundResponse({ description: 'Symbol not found' })
+  @ApiNotFoundResponse({ description: 'Instrument not found' })
   async getMarketQuality(@Param('symbol') symbol: string) {
-    const snapshot = this.binanceService.getMarketQualitySnapshot(symbol);
+    const snapshot = this.exchangeDataService.getMarketQualitySnapshot(symbol);
     if (!snapshot) {
       throw new NotFoundException(
         `Market quality report not found for symbol ${symbol}`,
@@ -94,7 +94,7 @@ export class ProviderMarketQualityController {
       candlesCountH4: Math.max(snapshotH4, persistedH4),
       candlesCountD1: Math.max(snapshotD1, persistedD1),
     };
-    const report = this.binanceService.getMarketQualityReport(
+    const report = this.exchangeDataService.getMarketQualityReport(
       snapshot.symbol,
       effectiveSnapshot,
     );
@@ -148,12 +148,12 @@ export class ProviderMarketQualityController {
     description:
       'symbol, live { summary, levels }, persisted { updatedAt, summary, levels }',
   })
-  @ApiNotFoundResponse({ description: 'Symbol not found' })
+  @ApiNotFoundResponse({ description: 'Instrument not found' })
   async getHorizontalVolumeProfile(@Param('symbol') symbol: string) {
     const normalized = String(symbol || '')
       .trim()
       .toUpperCase();
-    const snapshot = this.binanceService.getMarketQualitySnapshot(normalized);
+    const snapshot = this.exchangeDataService.getMarketQualitySnapshot(normalized);
     const persisted = await this.horizontalVolumeProfileRepository.getLatest(
       normalized,
     );
@@ -231,7 +231,7 @@ export class ProviderMarketQualityController {
   @ApiParam({ name: 'symbol', example: 'BTCUSDT' })
   @ApiQuery({ name: 'marketType', required: false, enum: ['SPOT', 'FUTURES'] })
   @ApiOkResponse({ description: 'symbol, compact, diagnostics' })
-  @ApiNotFoundResponse({ description: 'Symbol not found' })
+  @ApiNotFoundResponse({ description: 'Instrument not found' })
   async getLiquidityMap(
     @Param('symbol') symbol: string,
     @Query('marketType') marketType?: MarketType,
@@ -239,7 +239,7 @@ export class ProviderMarketQualityController {
     const normalized = String(symbol || '')
       .trim()
       .toUpperCase();
-    const snapshot = this.binanceService.getMarketQualitySnapshot(normalized);
+    const snapshot = this.exchangeDataService.getMarketQualitySnapshot(normalized);
     if (!snapshot) {
       throw new NotFoundException(
         `Liquidity map not found for symbol ${symbol}`,
@@ -272,7 +272,7 @@ export class ProviderMarketQualityController {
       diagnostics: Object.fromEntries(
         scopes.map((scope) => [
           scope,
-          this.binanceService.getLiquidityMapSnapshot(
+          this.exchangeDataService.getLiquidityMapSnapshot(
             normalized,
             scope,
             marketType ?? MarketType.futures,

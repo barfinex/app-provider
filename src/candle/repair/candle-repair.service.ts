@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Candle, TimeFrame } from '@barfinex/types';
 import { CandleQueryService } from '../candle-query.service';
 import { CandleWriterService } from '../candle-writer.service';
-import { SymbolHistoryService } from '../history/symbol-history.service';
+import { InstrumentHistoryService } from '../history/instrument-history.service';
 import { RequestFactoryService } from '../providers/request-factory.service';
 import { CandleWarmupGateService } from '../warmup/candle-warmup-gate.service';
 import {
@@ -23,7 +23,7 @@ export class CandleRepairService {
   constructor(
     private readonly query: CandleQueryService,
     private readonly writer: CandleWriterService,
-    private readonly symbolHistoryService: SymbolHistoryService,
+    private readonly symbolHistoryService: InstrumentHistoryService,
     private readonly requestFactoryService: RequestFactoryService,
     private readonly warmupGate: CandleWarmupGateService,
   ) {}

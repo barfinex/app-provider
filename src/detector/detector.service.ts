@@ -21,7 +21,7 @@ import {
   ConnectorType,
   TimeFrame,
   Trade,
-  TradingSymbol,
+  Instrument,
 } from '@barfinex/types';
 import { buildDetectorConfig } from '@barfinex/types';
 
@@ -167,7 +167,7 @@ export class DetectorService {
   async deleteAllOrders(options: {
     connectorType: ConnectorType;
     marketType: MarketType;
-    symbols?: TradingSymbol[];
+    symbols?: Instrument[];
     sysname: string;
   }): Promise<boolean> {
     const { connectorType, marketType, symbols } = options;
@@ -180,15 +180,15 @@ export class DetectorService {
   async updateSubscribeCollectionInConnector(options: {
     connectorType: ConnectorType;
     marketType: MarketType;
-    symbols: TradingSymbol[];
+    instruments: Instrument[];
     intervals?: TimeFrame[];
   }) {
-    const { connectorType, marketType, symbols, intervals } = options;
+    const { connectorType, marketType, instruments, intervals } = options;
 
     return this.connectorService.updateSubscribeCollection(
       connectorType,
       marketType,
-      symbols,
+      instruments,
       intervals,
     );
   }
@@ -262,7 +262,7 @@ export class DetectorService {
                   accounts: p.accounts ?? [],
                 }))
               : [providerStub],
-          symbols: Array.isArray(snapshot.symbols) ? snapshot.symbols : [],
+          instruments: Array.isArray(snapshot.instruments) ? snapshot.instruments : [],
           intervals: Array.isArray(snapshot.intervals)
             ? snapshot.intervals
             : [],
@@ -291,7 +291,7 @@ export class DetectorService {
       sysname: baseFromSnapshot?.sysname ?? displayName ?? appKey,
       restApiUrl: baseUrl ?? baseFromSnapshot?.restApiUrl ?? '',
       providers: baseFromSnapshot?.providers ?? [providerStub],
-      symbols: baseFromSnapshot?.symbols ?? [],
+      instruments: baseFromSnapshot?.instruments ?? [],
       intervals: baseFromSnapshot?.intervals ?? [],
     } as any);
 
@@ -309,7 +309,7 @@ export class DetectorService {
         ...(studioKey ? { studioKey } : {}),
         ...(baseFromSnapshot
           ? {
-              symbols: baseFromSnapshot.symbols,
+              instruments: baseFromSnapshot.instruments,
               intervals: baseFromSnapshot.intervals,
               subscriptions: baseFromSnapshot.subscriptions,
               qualityGate: baseFromSnapshot.qualityGate,
@@ -361,16 +361,16 @@ export class DetectorService {
   // -------------------------------------------------------
   // GET ACTIVE SYMBOLS
   // -------------------------------------------------------
-  async getAllActiveSymbols(): Promise<TradingSymbol[]> {
+  async getAllActiveSymbols(): Promise<Instrument[]> {
     const detectors = await this.detectorRepository.find();
 
-    const result: TradingSymbol[] = [];
+    const result: Instrument[] = [];
 
     for (const d of detectors) {
       if (!d.options.isActive) continue;
-      for (const s of d.options.symbols) {
-        if (!result.find((q) => q.name === s.name)) {
-          result.push({ name: s.name });
+      for (const s of d.options.instruments) {
+        if (!result.find((q) => q.symbol === s.symbol)) {
+          result.push({ symbol: s.symbol });
         }
       }
     }
@@ -435,7 +435,7 @@ export class DetectorService {
       },
       restApiUrl: '',
       providers: [],
-      symbols: [],
+      instruments: [],
       orders: [],
       intervals: [],
       indicators: [],
@@ -459,7 +459,7 @@ export class DetectorService {
   async getPrices(options: {
     sysname?: string;
     key?: string;
-    symbols: TradingSymbol[];
+    instruments: Instrument[];
   }): Promise<{ [k: string]: { value: number; moment: number } }> {
     const detector = await this.getDetector(options);
 
@@ -501,7 +501,7 @@ export class DetectorService {
   async getSymbolIndocatorState(options: {
     sysname?: string;
     key?: string;
-    symbol: TradingSymbol;
+    instrument: Instrument;
     selectIndicators: string[];
     interval: TimeFrame;
   }): Promise<any> {
@@ -513,7 +513,7 @@ export class DetectorService {
       if (!provider.restApiUrl) continue;
 
       try {
-        const url = `${provider.restApiUrl}/symbols/${options.symbol}/indicators/${options.interval}?selectIndicators=${options.selectIndicators}`;
+        const url = `${provider.restApiUrl}/symbols/${options.instrument.symbol}/indicators/${options.interval}?selectIndicators=${options.selectIndicators}`;
         const request = this.http
           .get(url)
           .pipe(map((res) => res.data))
@@ -533,10 +533,10 @@ export class DetectorService {
   // -------------------------------------------------------
   // GET CANDLES STATE (пока пусто)
   // -------------------------------------------------------
-  async getSymbolCandlesState(options: {
+  async getInstrumentCandlesState(options: {
     sysname?: string;
     key?: string;
-    symbol: TradingSymbol;
+    instrument: Instrument;
     interval: TimeFrame;
     orderBy: string;
   }): Promise<any> {
@@ -546,7 +546,7 @@ export class DetectorService {
   // -------------------------------------------------------
   // DETECTOR SYMBOL SUMMARY
   // -------------------------------------------------------
-  async getSymbols(sysname: string): Promise<any> {
+  async getInstruments(sysname: string): Promise<any> {
     const detector = await this.getDetector({ sysname });
     const result = [];
 
@@ -558,26 +558,26 @@ export class DetectorService {
           const connectorLastTrade = await this.connectorService.getPrices(
             connector.connectorType,
             market.marketType,
-            market.symbols,
+            market.instruments,
           );
 
           const detectorLastPrice = await this.getPrices({
             sysname,
-            symbols: detector.symbols,
+            instruments: detector.instruments,
           });
 
-          for (const symbol of detector.symbols) {
+          for (const symbol of detector.instruments) {
             result.push({
-              name: symbol.name,
+              name: symbol.symbol,
               leverage: symbol.leverage,
               defaultQuantity: symbol.quantity,
               intervals: detector.intervals,
               orders: [],
-              connectorLastTrade: connectorLastTrade[symbol.name] || {
+              connectorLastTrade: connectorLastTrade[symbol.symbol] || {
                 value: 0,
                 moment: null,
               },
-              detectorLastPrice: detectorLastPrice[symbol.name] || {
+              detectorLastPrice: detectorLastPrice[symbol.symbol] || {
                 value: 0,
                 moment: null,
               },

@@ -19,7 +19,7 @@ export class ProviderRuntimeInstanceDto {
   ownedScopes!: string[];
 
   @ApiProperty({
-    description: 'Symbol shard IDs this instance owns',
+    description: 'Instrument shard IDs this instance owns',
     example: ['shard0', 'shard1'],
     type: [String],
   })
@@ -47,7 +47,7 @@ export class ProviderRuntimeMetricsDto {
   orderbookRate!: number;
 
   @ApiPropertyOptional({
-    description: 'Symbol-level throughput when available',
+    description: 'Instrument-level throughput when available',
     type: [Object],
   })
   symbols?: unknown[];
@@ -85,7 +85,7 @@ export class ProviderOwnershipRecordDto {
   localState!: string;
 }
 
-/** Symbol sharding state: instance, owned shards, symbols per shard. */
+/** Instrument sharding state: instance, owned shards, symbols per shard. */
 export class ProviderShardsDto {
   @ApiProperty({ description: 'Provider instance ID' })
   instanceId!: string;

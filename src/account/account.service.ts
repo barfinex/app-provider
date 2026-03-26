@@ -7,11 +7,11 @@ import {
   Position,
   Connector,
   Order,
-  TradingSymbol,
+  Instrument,
 } from '@barfinex/types';
 import { ConnectorService } from '../connector/connector.service';
-import { BinanceClientService } from '../connector/datasource/binance/core/binance.client';
-import { normalizeTradingSymbol } from '../connector/utils/trading-symbol-sanitizer';
+import { BinanceClientService } from '@barfinex/exchange-binance';
+import { normalizeInstrumentName } from '../connector/utils/instrument-sanitizer';
 
 interface BalanceStatsSnapshot {
   rawAssetsCount: number;
@@ -31,7 +31,7 @@ export class AccountService {
   constructor(
     @Inject(forwardRef(() => ConnectorService))
     private readonly connectorService: ConnectorService,
-    private readonly binanceClient: BinanceClientService,
+    private readonly exchangeClient: BinanceClientService,
   ) {}
 
   // async onModuleInit() {
@@ -58,11 +58,11 @@ export class AccountService {
       assets: [],
       positions: [],
       orders: [],
-      symbols: [],
+      instruments: [],
       isActive: false,
     };
 
-    await this.binanceClient.ensureReady();
+    await this.exchangeClient.ensureReady();
 
     account = await this.connectorService.getAccountInfo(
       connectorType,
@@ -106,31 +106,31 @@ export class AccountService {
     // 🔥 ВАЖНО: ЗАПОЛНЯЕМ SYMBOLS (утраченная логика)
     // =========================================================================
 
-    const symbolsMap = new Map<string, TradingSymbol>();
+    const symbolsMap = new Map<string, Instrument>();
 
     // 1️⃣ Из позиций
     account.positions?.forEach((position) => {
-      if (position.symbol?.name) {
-        symbolsMap.set(position.symbol.name, {
-          name: position.symbol.name,
+      if (position.instrument?.symbol) {
+        symbolsMap.set(position.instrument.symbol, {
+          symbol: position.instrument.symbol,
           connectorType,
           marketType,
         });
       }
     });
 
-    // 2️⃣ Из активов: только если это уже валидная торговая пара Binance.
+    // 2️⃣ Из активов: только если это уже валидная торговая пара биржи.
     const candidateAssetSymbols = (account.assets ?? [])
-      .map((asset) => normalizeTradingSymbol(asset.symbol?.name))
+      .map((asset) => normalizeInstrumentName(asset.instrument?.symbol))
       .filter(Boolean);
-    const { validSymbols: validAssetSymbols } =
-      this.binanceClient.validateBinanceSymbols(
+    const { validInstruments: validAssetInstruments } =
+      this.exchangeClient.validateExchangeInstruments(
         marketType,
         candidateAssetSymbols,
       );
-    validAssetSymbols.forEach((symbolName) => {
+    validAssetInstruments.forEach((symbolName) => {
       symbolsMap.set(symbolName, {
-        name: symbolName,
+        symbol: symbolName,
         connectorType,
         marketType,
       });
@@ -139,13 +139,13 @@ export class AccountService {
     // 3️⃣ Гарантируем BTCUSDT
     if (!symbolsMap.has('BTCUSDT')) {
       symbolsMap.set('BTCUSDT', {
-        name: 'BTCUSDT',
+        symbol: 'BTCUSDT',
         connectorType,
         marketType,
       });
     }
 
-    account.symbols = Array.from(symbolsMap.values());
+    account.instruments = Array.from(symbolsMap.values());
 
     return account;
   }
@@ -163,12 +163,12 @@ export class AccountService {
 
   async changeLeverage(
     connectorType: ConnectorType,
-    symbol: TradingSymbol,
+    instrument: Instrument,
     newLeverage: number,
-  ): Promise<TradingSymbol> {
+  ): Promise<Instrument> {
     return await this.connectorService.changeLeverage(
       connectorType,
-      symbol,
+      instrument,
       newLeverage,
     );
   }

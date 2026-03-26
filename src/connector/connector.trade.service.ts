@@ -8,23 +8,18 @@ import {
   Order,
   ConnectorType,
   MarketType,
-  TradingSymbol,
+  Instrument,
   SubscriptionType,
   OrderSource,
   EventMessageByType,
+  ExchangeConnectorStatus,
 } from '@barfinex/types';
 import { ClientProxy } from '@nestjs/microservices';
 import { randomUUID } from 'crypto';
 
-// import {
-
-//     AlpacaService,
-//     TinkoffService,
-//     TestnetBinanceFuturesService,
-// } from './datasource';
-
 import { ConnectorRegistry } from './connector.registry';
-import { BinanceService } from './datasource/binance/binance.service';
+import { ExchangeDataService } from './datasource/exchange/exchange-data.service';
+import { ExchangeManagerService } from './exchange-manager/exchange-manager.service';
 
 @Injectable()
 export class ConnectorTradeService {
@@ -35,10 +30,8 @@ export class ConnectorTradeService {
   private lastTransientEmitWarnAt = 0;
 
   constructor(
-    private readonly binanceService: BinanceService,
-    // private readonly alpacaService: AlpacaService,
-    // private readonly tinkoffService: TinkoffService,
-    // private readonly testnetBinanceFuturesService: TestnetBinanceFuturesService,
+    private readonly exchangeDataService: ExchangeDataService,
+    private readonly exchangeManager: ExchangeManagerService,
 
     @Inject('PROVIDER_SERVICE')
     private readonly client: ClientProxy,
@@ -50,21 +43,11 @@ export class ConnectorTradeService {
 
   async changeLeverage(
     connectorType: ConnectorType,
-    symbol: TradingSymbol,
+    instrument: Instrument,
     newLeverage: number,
-  ): Promise<TradingSymbol> {
-    switch (connectorType) {
-      case ConnectorType.binance:
-        return await this.binanceService.changeLeverage(symbol, newLeverage);
-
-      // case ConnectorType.testnetBinanceFutures:
-      //     return await this.testnetBinanceFuturesService.changeLeverage(symbol, newLeverage);
-
-      default:
-        throw new Error(
-          `[ConnectorTradeService] Unsupported connector type: ${connectorType}`,
-        );
-    }
+  ): Promise<Instrument> {
+    this.assertActive(connectorType, instrument.marketType as MarketType);
+    return await this.exchangeDataService.changeLeverage(instrument, newLeverage);
   }
 
   // =========================================================================
@@ -87,30 +70,8 @@ export class ConnectorTradeService {
         },
       };
 
-    let result: Order;
-
-    switch (order.connectorType) {
-      case ConnectorType.binance:
-        result = await this.binanceService.openOrder(order);
-        break;
-
-      // case ConnectorType.alpaca:
-      //     result = await this.alpacaService.openOrder(order);
-      //     break;
-
-      // case ConnectorType.tinkoff:
-      //     result = await this.tinkoffService.openOrder(order);
-      //     break;
-
-      // case ConnectorType.testnetBinanceFutures:
-      //     result = await this.testnetBinanceFuturesService.openOrder(order);
-      //     break;
-
-      default:
-        throw new BadRequestException(
-          `Unsupported connector type: ${order.connectorType}`,
-        );
-    }
+    this.assertActive(order.connectorType, order.marketType);
+    const result = await this.exchangeDataService.openOrder(order);
 
     if (this.isEmitToRedisEnabled) {
       this.logger.debug(
@@ -130,54 +91,35 @@ export class ConnectorTradeService {
   // =========================================================================
 
   async getOpenOrders(options: {
-    symbol: TradingSymbol;
+    instrument: Instrument;
     source: OrderSource;
     connectorType: ConnectorType;
     marketType: MarketType;
   }): Promise<Order[]> {
-    const { symbol, connectorType, marketType } = options;
+    const { instrument, connectorType, marketType } = options;
 
-    switch (connectorType) {
-      case ConnectorType.binance:
-        return await this.binanceService.getOpenOrders({
-          symbol,
-          marketType,
-        });
+    const status = this.exchangeManager.getStatus(connectorType, marketType);
+    if (status === ExchangeConnectorStatus.INACTIVE) return [];
 
-      case ConnectorType.alpaca:
-        return [];
-
-      case ConnectorType.tinkoff:
-        return [];
-
-      case ConnectorType.testnetBinanceFutures:
-        return [];
-
-      default:
-        throw new BadRequestException(
-          `Unsupported connector type: ${connectorType}`,
-        );
-    }
+    return await this.exchangeDataService.getOpenOrders({
+      instrument,
+      marketType,
+    });
   }
 
   async getAllOpenOrders(options: {
     connectorType: ConnectorType;
     marketType: MarketType;
   }): Promise<Order[]> {
-    switch (options.connectorType) {
-      case ConnectorType.binance:
-        return await this.binanceService.getOpenOrders({
-          marketType: options.marketType,
-        });
+    const status = this.exchangeManager.getStatus(
+      options.connectorType,
+      options.marketType,
+    );
+    if (status === ExchangeConnectorStatus.INACTIVE) return [];
 
-      // case ConnectorType.testnetBinanceFutures:
-      //     return await this.testnetBinanceFuturesService.getOpenOrders({ marketType: options.marketType });
-
-      default:
-        throw new BadRequestException(
-          `Unsupported connector type: ${options.connectorType}`,
-        );
-    }
+    return await this.exchangeDataService.getOpenOrders({
+      marketType: options.marketType,
+    });
   }
 
   // =========================================================================
@@ -185,7 +127,7 @@ export class ConnectorTradeService {
   // =========================================================================
 
   async closeOrder(order: Order): Promise<Order> {
-    const { externalId, symbol, connectorType, marketType, source } = order;
+    const { externalId, instrument, connectorType, marketType, source } = order;
 
     if (!externalId) {
       throw new BadRequestException(
@@ -193,46 +135,17 @@ export class ConnectorTradeService {
       );
     }
 
-    if (!symbol) {
+    if (!instrument) {
       throw new BadRequestException('Order.symbol is required to close order');
     }
 
-    let result: Order = {
-      useSandbox: false,
-      connectorType,
+    this.assertActive(connectorType, marketType);
+
+    const result = await this.exchangeDataService.closeOrder({
+      id: externalId,
+      symbol: instrument,
       marketType,
-      source,
-      closeTime: null,
-    };
-
-    switch (connectorType) {
-      case ConnectorType.binance:
-        result = await this.binanceService.closeOrder({
-          id: externalId,
-          symbol,
-          marketType,
-        });
-        break;
-
-      // case ConnectorType.testnetBinanceFutures:
-      //     result = await this.testnetBinanceFuturesService.closeOrder({
-      //         id: externalId,
-      //         symbol,
-      //         marketType,
-      //     });
-      //     break;
-
-      case ConnectorType.alpaca:
-      case ConnectorType.tinkoff:
-        throw new BadRequestException(
-          `closeOrder not supported for ${connectorType}`,
-        );
-
-      default:
-        throw new BadRequestException(
-          `Unsupported connector type: ${connectorType}`,
-        );
-    }
+    });
 
     const metadata = this.createEventMetadata(this.resolveTraceId(order));
     const subscriptionValue: EventMessageByType<SubscriptionType.PROVIDER_ORDER_CLOSE> =
@@ -349,27 +262,34 @@ export class ConnectorTradeService {
   // =========================================================================
 
   async closeAllOrders(options: {
-    symbol: TradingSymbol;
+    instrument: Instrument;
     connectorType: ConnectorType;
     marketType: MarketType;
   }): Promise<void> {
-    const { symbol, connectorType, marketType } = options;
+    const { instrument, connectorType, marketType } = options;
+    this.assertActive(connectorType, marketType);
+    return await this.exchangeDataService.closeAllOrders({
+      instrument,
+      marketType,
+    });
+  }
 
-    switch (connectorType) {
-      case ConnectorType.binance:
-        return await this.binanceService.closeAllOrders({
-          symbol,
-          marketType,
-        });
+  // =========================================================================
+  // 🔹 PRIVATE
+  // =========================================================================
 
-      case ConnectorType.alpaca:
-        return;
-
-      case ConnectorType.tinkoff:
-        return;
-
-      // case ConnectorType.testnetBinanceFutures:
-      //     return await this.testnetBinanceFuturesService.closeAllOrders({ symbol, marketType });
+  private assertActive(
+    connectorType: ConnectorType,
+    marketType: MarketType,
+  ): void {
+    const status = this.exchangeManager.getStatus(connectorType, marketType);
+    if (
+      status !== ExchangeConnectorStatus.ACTIVE &&
+      status !== ExchangeConnectorStatus.CONNECTING
+    ) {
+      throw new BadRequestException(
+        `Connector ${connectorType}:${marketType} is not active (status: ${status})`,
+      );
     }
   }
 }

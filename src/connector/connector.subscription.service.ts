@@ -1,18 +1,20 @@
 import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
-import { ConnectorType, MarketType, TradingSymbol, TimeFrame } from '@barfinex/types';
+import {
+  ConnectorType,
+  MarketType,
+  Instrument,
+  TimeFrame,
+  ExchangeConnectorStatus,
+} from '@barfinex/types';
 
-// import {
-//     AlpacaService,
-//     TinkoffService,
-//     TestnetBinanceFuturesService,
-// } from './datasource';
-import { BinanceService } from './datasource/binance/binance.service';
+import { ExchangeDataService } from './datasource/exchange/exchange-data.service';
 import { CandleSyncService } from '../candle/sync/candle-sync.service';
 import { QuestDBQueryService } from '../questdb/questdb-query.service';
+import { ExchangeManagerService } from './exchange-manager/exchange-manager.service';
 import {
-  normalizeTradingSymbol,
-  sanitizeTradingSymbolObjects,
-} from './utils/trading-symbol-sanitizer';
+  normalizeInstrumentName,
+  sanitizeInstruments,
+} from './utils/instrument-sanitizer';
 
 interface SymbolPipelineBalanceMeta {
   rawAssetsCount?: number;
@@ -22,7 +24,7 @@ interface SymbolPipelineBalanceMeta {
 @Injectable()
 export class ConnectorSubscriptionService {
   private readonly logger = new Logger(ConnectorSubscriptionService.name);
-  private static readonly MAX_SYMBOLS = 100;
+  private static readonly MAX_INSTRUMENTS = 100;
   private readonly symbolPipelineLogThrottleMs = Math.max(
     1_000,
     Number(process.env.SYMBOL_PIPELINE_LOG_THROTTLE_MS || 5_000),
@@ -30,10 +32,11 @@ export class ConnectorSubscriptionService {
   private readonly lastSymbolPipelineLogAt = new Map<string, number>();
 
   constructor(
-    private readonly binanceService: BinanceService,
+    private readonly exchangeDataService: ExchangeDataService,
     @Inject(forwardRef(() => CandleSyncService))
     private readonly candleSync: CandleSyncService,
-    private readonly questDbQueryService: QuestDBQueryService, // private readonly alpacaService: AlpacaService, // private readonly tinkoffService: TinkoffService, // private readonly testnetBinanceFuturesService: TestnetBinanceFuturesService,
+    private readonly questDbQueryService: QuestDBQueryService,
+    private readonly exchangeManager: ExchangeManagerService,
   ) {}
 
   // =========================================================================
@@ -43,7 +46,7 @@ export class ConnectorSubscriptionService {
   async subscribeCollection(
     connectorType: ConnectorType,
     marketType: MarketType,
-    symbols: TradingSymbol[],
+    instruments: Instrument[],
     intervals: TimeFrame[],
     pipelineMeta?: SymbolPipelineBalanceMeta,
   ): Promise<any> {
@@ -51,24 +54,24 @@ export class ConnectorSubscriptionService {
     const sanitized = this.sanitizeSymbolsAtPipelineEntry(
       connectorType,
       marketType,
-      symbols,
+      instruments,
       pipelineMeta,
     );
 
-    switch (connectorType) {
-      case ConnectorType.binance:
-        await this.binanceService.subscribe(marketType, sanitized, intervals);
-        break;
-
-      case ConnectorType.alpaca:
-        break;
-
-      case ConnectorType.tinkoff:
-        break;
-
-      // case ConnectorType.testnetBinanceFutures:
-      //     return await this.testnetBinanceFuturesService.subscribe(marketType, symbols, intervals);
-      //     break;
+    const status = this.exchangeManager.getStatus(connectorType, marketType);
+    if (
+      status === ExchangeConnectorStatus.ACTIVE ||
+      status === ExchangeConnectorStatus.CONNECTING
+    ) {
+      await this.exchangeDataService.subscribe(marketType, sanitized, intervals);
+      this.exchangeManager.updateCounts(connectorType, marketType, {
+        instrumentCount: sanitized.length,
+        subscriptionCount: intervals.length,
+      });
+    } else {
+      this.logger.warn(
+        `Skipping subscribe for ${connectorType}:${marketType} — status=${status}`,
+      );
     }
   }
 
@@ -77,21 +80,7 @@ export class ConnectorSubscriptionService {
   // =========================================================================
 
   async unsubscribeCollection(connectorType: ConnectorType): Promise<any> {
-    switch (connectorType) {
-      case ConnectorType.binance:
-        await this.binanceService.unsubscribe();
-        break;
-
-      case ConnectorType.alpaca:
-        break;
-
-      case ConnectorType.tinkoff:
-        break;
-
-      // case ConnectorType.testnetBinanceFutures:
-      //     return await this.testnetBinanceFuturesService.unsubscribe();
-      //     break;
-    }
+    await this.exchangeDataService.unsubscribe();
   }
 
   // =========================================================================
@@ -101,25 +90,25 @@ export class ConnectorSubscriptionService {
   async updateSubscribeCollection(
     connectorType: ConnectorType,
     marketType: MarketType,
-    symbols: TradingSymbol[],
+    instruments: Instrument[],
     intervals?: TimeFrame[],
     pipelineMeta?: SymbolPipelineBalanceMeta,
   ): Promise<void> {
     const sanitizedSymbols = this.sanitizeSymbolsAtPipelineEntry(
       connectorType,
       marketType,
-      symbols,
+      instruments,
       pipelineMeta,
     );
     const payload = {
       connectorType,
       marketType,
-      symbols: sanitizedSymbols,
+      instruments: sanitizedSymbols,
       intervals: intervals ?? [],
     };
     this.logger.log(
-      `Emitting CANDLE_SUBSCRIPTIONS_UPDATED ${connectorType}:${marketType} symbols=${
-        payload.symbols.length
+      `Emitting CANDLE_SUBSCRIPTIONS_UPDATED ${connectorType}:${marketType} instruments=${
+        payload.instruments.length
       } intervals=${(payload.intervals ?? []).length}`,
     );
     await this.candleSync.onSubscriptionsUpdated(payload);
@@ -127,40 +116,46 @@ export class ConnectorSubscriptionService {
     await this.candleSync.waitForWarmupCompletion();
     await this.questDbQueryService.waitForWalDrain('candles');
 
-    switch (connectorType) {
-      case ConnectorType.binance:
-        await this.binanceService.updateSubscribeCollection(
-          marketType,
-          sanitizedSymbols,
-          intervals,
-        );
-        break;
-
-      case ConnectorType.alpaca:
-        break;
-
-      case ConnectorType.tinkoff:
-        break;
+    const status = this.exchangeManager.getStatus(connectorType, marketType);
+    if (
+      status === ExchangeConnectorStatus.ACTIVE ||
+      status === ExchangeConnectorStatus.CONNECTING
+    ) {
+      await this.exchangeDataService.updateSubscribeCollection(
+        marketType,
+        sanitizedSymbols,
+        intervals,
+      );
+      this.exchangeManager.updateCounts(connectorType, marketType, {
+        instrumentCount: sanitizedSymbols.length,
+      });
+    } else {
+      this.logger.warn(
+        `Skipping updateSubscribe for ${connectorType}:${marketType} — status=${status}`,
+      );
     }
   }
 
   private sanitizeSymbolsAtPipelineEntry(
     connectorType: ConnectorType,
     marketType: MarketType,
-    symbols: TradingSymbol[],
+    instruments: Instrument[],
     pipelineMeta?: SymbolPipelineBalanceMeta,
-  ): TradingSymbol[] {
-    const inputSymbols = symbols
-      .map((s) => normalizeTradingSymbol(s?.name))
+  ): Instrument[] {
+    const inputSymbols = instruments
+      .map((s) => normalizeInstrumentName(s?.symbol))
       .filter(Boolean);
-    const { validSymbols, removedSymbols } =
-      connectorType === ConnectorType.binance
-        ? this.binanceService.validateBinanceSymbolObjects(marketType, symbols)
-        : sanitizeTradingSymbolObjects(symbols);
 
-    if (validSymbols.length > ConnectorSubscriptionService.MAX_SYMBOLS) {
+    // For connectors that support real-time validation, use exchange validation;
+    // otherwise fall back to generic sanitization
+    const { validInstruments, removedInstruments } =
+      this.exchangeManager.isActive(connectorType, marketType)
+        ? this.exchangeDataService.validateSymbolObjects(marketType, instruments)
+        : sanitizeInstruments(instruments);
+
+    if (validInstruments.length > ConnectorSubscriptionService.MAX_INSTRUMENTS) {
       this.logger.warn(
-        `[SymbolPipelineProtection] symbol_count_exceeds_limit symbols=${validSymbols.length} limit=${ConnectorSubscriptionService.MAX_SYMBOLS}`,
+        `[InstrumentPipelineProtection] instrument_count_exceeds_limit symbols=${validInstruments.length} limit=${ConnectorSubscriptionService.MAX_INSTRUMENTS}`,
       );
     }
 
@@ -168,19 +163,19 @@ export class ConnectorSubscriptionService {
       connectorType,
       marketType,
       inputSymbols,
-      validSymbols,
-      removedSymbols,
+      validInstruments,
+      removedInstruments,
       pipelineMeta,
     );
-    return validSymbols;
+    return validInstruments;
   }
 
   private logSymbolPipeline(
     connectorType: ConnectorType,
     marketType: MarketType,
     inputSymbols: string[],
-    validSymbols: TradingSymbol[],
-    removedSymbols: string[],
+    validInstruments: Instrument[],
+    removedInstruments: string[],
     pipelineMeta?: SymbolPipelineBalanceMeta,
   ): void {
     const key = `${connectorType}:${marketType}`;
@@ -198,10 +193,10 @@ export class ConnectorSubscriptionService {
         `active_assets=${activeAssetsCount} ` +
         `input_symbols=${inputSymbols.join(',') || 'none'} ` +
         `valid_symbols=${
-          validSymbols.map((s) => normalizeTradingSymbol(s?.name)).join(',') ||
+          validInstruments.map((s) => normalizeInstrumentName(s?.symbol)).join(',') ||
           'none'
         } ` +
-        `removed_symbols=${removedSymbols.join(',') || 'none'}`,
+        `removed_instruments=${removedInstruments.join(',') || 'none'}`,
     );
   }
 }

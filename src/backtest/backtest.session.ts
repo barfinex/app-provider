@@ -122,7 +122,7 @@ export class BacktestSession {
       .catch((err: unknown) => {
         this.logger.warn(
           `[Backtest] candle publish failed symbol=${
-            candle.symbol?.name
+            candle.instrument?.symbol
           } interval=${candle.interval}: ${
             err instanceof Error ? err.message : String(err)
           }`,

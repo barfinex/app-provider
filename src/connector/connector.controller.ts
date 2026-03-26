@@ -2,7 +2,7 @@ import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import {
   ConnectorType,
   MarketType,
-  TradingSymbol,
+  Instrument,
   TimeFrame,
   Detector,
 } from '@barfinex/types';
@@ -92,7 +92,7 @@ export class ConnectorController {
   })
   @ApiBody({
     description:
-      'connectorType, marketType, symbols (Symbol[]), intervals (TimeFrame[])',
+      'connectorType, marketType, instruments (Instrument[]), intervals (TimeFrame[])',
     schema: {
       type: 'object',
       required: ['connectorType', 'marketType', 'symbols', 'intervals'],
@@ -110,15 +110,15 @@ export class ConnectorController {
     content: {
       connectorType: ConnectorType;
       marketType: MarketType;
-      symbols: TradingSymbol[];
+      instruments: Instrument[];
       intervals: TimeFrame[];
     },
   ) {
-    const { connectorType, marketType, symbols, intervals } = content;
+    const { connectorType, marketType, instruments, intervals } = content;
     await this.connectorService.updateSubscribeCollection(
       connectorType,
       marketType,
-      symbols,
+      instruments,
       intervals,
     );
   }

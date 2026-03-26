@@ -49,6 +49,9 @@
     },
     {
       "path": "../../libs/diagnostics"
+    },
+    {
+      "path": "../../libs/exchange-binance"
     }
   ]
 }

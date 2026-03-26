@@ -12,7 +12,7 @@ import { DetectorEventAdapter } from './adapters/detector.adapter';
 import { InspectorEventAdapter } from './adapters/inspector.adapter';
 import { OrderEventAdapter } from './adapters/order.adapter';
 import { OrderBookEventAdapter } from './adapters/orderbook.adapter';
-import { SymbolEventAdapter } from './adapters/symbol.adapter';
+import { InstrumentEventAdapter } from './adapters/instrument.adapter';
 import { TradeEventAdapter } from './adapters/trade.adapter';
 
 // QuestDB integration
@@ -40,7 +40,7 @@ import { QuestDBModule } from '../questdb.module';
     InspectorEventAdapter,
     OrderEventAdapter,
     OrderBookEventAdapter,
-    SymbolEventAdapter,
+    InstrumentEventAdapter,
     TradeEventAdapter,
   ],
 
@@ -53,7 +53,7 @@ import { QuestDBModule } from '../questdb.module';
     InspectorEventAdapter,
     OrderEventAdapter,
     OrderBookEventAdapter,
-    SymbolEventAdapter,
+    InstrumentEventAdapter,
     TradeEventAdapter,
   ],
 })

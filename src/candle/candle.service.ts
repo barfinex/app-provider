@@ -4,7 +4,7 @@ import {
   History,
   MarketType,
   ConnectorType,
-  TradingSymbol,
+  Instrument,
   Candle,
 } from '@barfinex/types';
 
@@ -81,26 +81,26 @@ export class CandleService {
   async get(
     connectorType: ConnectorType,
     marketType: MarketType,
-    symbol: TradingSymbol,
+    instrument: Instrument,
     interval: TimeFrame,
     options?: { days?: number },
   ): Promise<Candle[]> {
     const rows = await this.history.getSingle({
       connectorType,
       marketType,
-      symbol,
+      instrument,
       interval,
       days: options?.days,
     });
     this.logger.debug(
-      `[CANDLES] tf=${interval} rows=${rows.length} symbol=${symbol.name}`,
+      `[CANDLES] tf=${interval} rows=${rows.length} symbol=${instrument.symbol}`,
     );
     return rows;
   }
 
   async getByDetectorSysname(
     detectorSysname: string,
-    symbol: string | TradingSymbol,
+    symbol: string | Instrument,
     interval: TimeFrame,
   ): Promise<Candle[]> {
     return this.detectorHistory.getByDetectorSysname(
@@ -213,7 +213,7 @@ export class CandleService {
           symbol,
           targetTf,
           {
-            symbol: { name: symbol },
+            instrument: { symbol: symbol },
             interval: targetTf,
             time: bucketStart,
             open: agg.open,
